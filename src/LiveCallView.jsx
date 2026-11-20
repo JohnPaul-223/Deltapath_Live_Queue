@@ -1,216 +1,423 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchLiveSnapshot, startLiveSession, stopLiveSession } from './api.js';
 
-function formatWait(value) {
-  const seconds = Number(String(value || 0).replace(/[^0-9.]/g, '')) || 0;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+/* ─── Helpers ─────────────────────────────────────────────────────── */
+function fmtSeconds(raw) {
+  const s = Number(String(raw ?? 0).replace(/[^0-9.]/g, '')) || 0;
+  const m = Math.floor(s / 60);
+  return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 }
 
-export default function LiveCallView({ form }) {
-  // session holds { token, server, username, allowInvalidTLS } returned by startLiveSession.
-  // Keeping it in state (instead of a server-side Map) is what makes this serverless-compatible.
-  const [session, setSession] = useState(null);
-  const [starting, setStarting] = useState(false);
-  const [liveData, setLiveData] = useState(null);
-  const [liveError, setLiveError] = useState('');
-  const [clock, setClock] = useState(() => new Date());
-  const pollRef = useRef(null);
+function fmtTime(date) {
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
-  useEffect(() => {
-    const timer = setInterval(() => setClock(new Date()), 1000);
-    return () => {
-      clearInterval(timer);
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, []);
+function fmtDate(date) {
+  return date.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+}
 
-  const start = async () => {
-    setStarting(true);
-    setLiveError('');
-    if (pollRef.current) clearInterval(pollRef.current);
-    try {
-      const liveSession = await startLiveSession(form);
-      setSession(liveSession);
-      const poll = async () => {
-        try {
-          const snapshot = await fetchLiveSnapshot(liveSession);
-          setLiveData(snapshot);
-          setLiveError(snapshot.statuses?.queues === 200 ? '' : `Queue endpoint HTTP ${snapshot.statuses?.queues}`);
-        } catch (error) {
-          setLiveError(error.message);
-        }
-      };
-      await poll();
-      pollRef.current = setInterval(poll, 3000);
-    } catch (error) {
-      setLiveError(error.message);
-    } finally {
-      setStarting(false);
-    }
-  };
+const POLL_INTERVAL = 5000;   // ms between polls
+const MAX_RETRIES   = 3;      // consecutive errors before showing degraded banner
 
-  const stop = async () => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = null;
-    await stopLiveSession(session);
-    setSession(null);
-    setLiveData(null);
-  };
+/* ─── Sub-components ──────────────────────────────────────────────── */
+function KpiCard({ label, value, sub, variant }) {
+  return (
+    <div className={`kpiCard${variant ? ` kpiCard--${variant}` : ''}`}>
+      <span className="kpiLabel">{label}</span>
+      <strong className="kpiValue">{value}</strong>
+      {sub && <small className="kpiSub">{sub}</small>}
+    </div>
+  );
+}
 
-  const calls = liveData?.liveCalls || (liveData?.liveCall ? [liveData.liveCall] : []);
-  const waiting = calls.filter((call) => call.status === 'Waiting');
-  const active = calls.filter((call) => call.status === 'Ringing' || call.status === 'Connected');
-  const agents = liveData?.liveAgents || [];
-  const stats = liveData?.liveStats || {};
-  const completed = Number(stats.completed || 0);
-  const abandoned = Number(stats.abandoned || 0);
-  const total = completed + abandoned;
-  const abandonRate = total ? (abandoned / total) * 100 : 0;
-  const serviceLevel = Number(stats.serviceLevelPerf || 0);
-  const longestWait = waiting.length
-    ? waiting.map((call) => Number(String(call.wait).replace(/[^0-9.]/g, '')) || 0).sort((a, b) => b - a)[0]
-    : 0;
-  const available = agents.filter((agent) => !agent.paused && ['1', '2'].includes(agent.statusCode)).length;
-  const breaking = agents.filter((agent) => agent.paused).length;
-  const offline = Math.max(0, agents.length - available - active.length - breaking);
-  const queueStatus = waiting.length > 10 ? 'crit' : waiting.length > 4 ? 'warn' : 'ok';
+function AgentCard({ agent, activeCalls }) {
+  const isOnCall = activeCalls.some(
+    (c) => c.agent === agent.name || c.agentExt === agent.location,
+  );
+  const status = isOnCall
+    ? 'oncall'
+    : agent.paused
+    ? 'away'
+    : ['1', '2'].includes(agent.statusCode)
+    ? 'avail'
+    : 'offline';
+
+  const statusLabel = { oncall: 'On call', away: 'On break', avail: 'Available', offline: 'Offline' }[status];
 
   return (
-    <div className="hotlineView">
-      <header className="hotlineHeader">
-        <div className="hotlineTitle">
-          <strong>Hotline Monitor</strong>
-          <span className={session ? 'liveBadge on' : 'liveBadge'}>{session ? 'LIVE' : 'STANDBY'}</span>
+    <div className="agentCard" data-status={status}>
+      <div className="agentMeta">
+        <strong className="agentName">{agent.name}</strong>
+        <span className="agentStatus">{statusLabel}</span>
+      </div>
+      <small className="agentExt">
+        {agent.location ? `Ext ${agent.location}` : `${agent.callsTaken || 0} calls`}
+      </small>
+    </div>
+  );
+}
+
+/* ─── Main component ──────────────────────────────────────────────── */
+export default function LiveCallView({ credentials, onAuthError, onConnected, onDisconnect }) {
+  const [session, setSession]       = useState(null);
+  const [liveData, setLiveData]     = useState(null);
+  const [status, setStatus]         = useState('connecting'); // connecting | live | degraded | stopped
+  const [errorMsg, setErrorMsg]     = useState('');
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [clock, setClock]           = useState(() => new Date());
+  const [retries, setRetries]       = useState(0);
+
+  const pollRef    = useRef(null);
+  const sessionRef = useRef(null); // kept in sync so stop() can read it without stale closure
+
+  /* Live clock */
+  useEffect(() => {
+    const t = setInterval(() => setClock(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  /* ── Poll ── */
+  const poll = useCallback(async (sess) => {
+    try {
+      const snapshot = await fetchLiveSnapshot(sess);
+      setLiveData(snapshot);
+      setLastUpdate(new Date());
+      setRetries(0);
+      setStatus('live');
+      setErrorMsg('');
+    } catch (err) {
+      setRetries((r) => {
+        const next = r + 1;
+        if (next >= MAX_RETRIES) {
+          setStatus('degraded');
+          setErrorMsg(err.message);
+        }
+        return next;
+      });
+    }
+  }, []);
+
+  /* ── Connect on mount ── */
+  useEffect(() => {
+    let cancelled = false;
+
+    async function connect() {
+      try {
+        const sess = await startLiveSession(credentials);
+        if (cancelled) { stopLiveSession(sess); return; }
+        setSession(sess);
+        sessionRef.current = sess;
+        await poll(sess);
+        if (cancelled) return;
+        onConnected?.();
+        pollRef.current = setInterval(() => poll(sess), POLL_INTERVAL);
+      } catch (err) {
+        if (!cancelled) onAuthError?.(err.message);
+      }
+    }
+
+    connect();
+    return () => {
+      cancelled = true;
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (sessionRef.current) stopLiveSession(sessionRef.current);
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — intentionally once per mount
+
+  /* ── Disconnect ── */
+  const handleDisconnect = async () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    setStatus('stopped');
+    if (sessionRef.current) await stopLiveSession(sessionRef.current);
+    onDisconnect?.();
+  };
+
+  /* ── Derived data ── */
+  const calls    = liveData?.liveCalls || (liveData?.liveCall ? [liveData.liveCall] : []);
+  const waiting  = calls.filter((c) => c.status === 'Waiting');
+  const active   = calls.filter((c) => c.status === 'Ringing' || c.status === 'Connected');
+  const agents   = liveData?.liveAgents || [];
+  const stats    = liveData?.liveStats  || {};
+
+  const completed    = Number(stats.completed  || 0);
+  const abandoned    = Number(stats.abandoned  || 0);
+  const totalCalls   = completed + abandoned;
+  const abandonRate  = totalCalls ? (abandoned / totalCalls) * 100 : 0;
+  const svcLevel     = Number(stats.serviceLevelPerf || 0);
+  const longestWait  = waiting.length
+    ? Math.max(...waiting.map((c) => Number(String(c.wait).replace(/[^0-9.]/g, '')) || 0))
+    : 0;
+
+  const available = agents.filter((a) => !a.paused && ['1', '2'].includes(a.statusCode)).length;
+  const onBreak   = agents.filter((a) => a.paused).length;
+  const offline   = Math.max(0, agents.length - available - active.length - onBreak);
+
+  const queueLevel = waiting.length > 10 ? 'crit' : waiting.length > 4 ? 'warn' : 'ok';
+  const queueLabel = { ok: 'Queue Normal', warn: 'Queue Busy', crit: 'Queue Critical' }[queueLevel];
+
+  const isLive = status === 'live' || status === 'degraded';
+
+  return (
+    <div className="monitor">
+
+      {/* ── Top bar ── */}
+      <header className="monitorTopbar">
+        <div className="topbarLeft">
+          <div className="topbarBrand">
+            <div className="topbarMark">D</div>
+            <div className="topbarTitle">
+              <strong>Deltapath</strong>
+              <span>Live Queue Monitor</span>
+            </div>
+          </div>
+          <div className="topbarServer" title={credentials.server}>
+            <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.1"/><path d="M8 1.5C8 1.5 5.5 4 5.5 8s2.5 6.5 2.5 6.5M8 1.5C8 1.5 10.5 4 10.5 8S8 14.5 8 14.5M1.5 8h13" stroke="currentColor" strokeWidth="1.1"/></svg>
+            {credentials.server}
+          </div>
         </div>
-        <div className={`queueHealth ${queueStatus}`}>
-          {waiting.length > 10 ? 'QUEUE CRITICAL' : waiting.length > 4 ? 'QUEUE BUSY' : 'QUEUE NORMAL'}
+
+        <div className="topbarCenter">
+          <div className={`statusPill statusPill--${queueLevel}`}>{queueLabel}</div>
         </div>
-        <div className="hotlineActions">
-          {session
-            ? <button onClick={stop} className="monitorStop">Stop monitoring</button>
-            : <button onClick={start} className="monitorStart" disabled={starting}>{starting ? 'Connecting…' : 'Start monitoring'}</button>}
-        </div>
-        <div className="hotlineClock">
-          <strong>{clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong>
-          <span>{clock.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+
+        <div className="topbarRight">
+          <div className="topbarStatusRow">
+            <span className={`liveDot${isLive ? ' liveDot--on' : ''}`} />
+            <span className="liveLabel">{status === 'connecting' ? 'Connecting…' : status === 'live' ? 'Live' : status === 'degraded' ? 'Degraded' : 'Stopped'}</span>
+            {lastUpdate && <span className="lastUpdate">Updated {fmtTime(lastUpdate)}</span>}
+          </div>
+          <button className="disconnectBtn" onClick={handleDisconnect}>Disconnect</button>
+          <div className="topbarClock">
+            <strong>{fmtTime(clock)}</strong>
+            <span>{fmtDate(clock)}</span>
+          </div>
         </div>
       </header>
 
-      {liveError && <div className="liveErrorBanner" role="alert">⚠ {liveError}</div>}
+      {/* ── Error banner ── */}
+      {status === 'degraded' && (
+        <div className="errorBanner" role="alert">
+          <svg viewBox="0 0 16 16" fill="none"><path d="M8 2L14.5 13.5H1.5L8 2z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/><path d="M8 7v3M8 11.5v.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
+          Connection unstable — {errorMsg}. Retrying automatically.
+        </div>
+      )}
 
-      <section className="hotlineKpis">
-        <div className="kpiGroup callsToday">
-          <h2>Calls today</h2>
-          <div className="kpiRow four">
-            <div className="hotKpi"><span>Total calls</span><strong>{total}</strong><small>answered + abandoned</small></div>
-            <div className="hotKpi answered"><span>Answered</span><strong>{completed}</strong></div>
-            <div className="hotKpi abandoned"><span>Abandoned</span><strong>{abandoned}</strong><small>hung up in queue</small></div>
-            <div className="hotKpi abandoned"><span>Abandon rate</span><strong>{abandonRate.toFixed(1)}%</strong><small>target below 5%</small></div>
+      {status === 'connecting' && !liveData && (
+        <div className="connectingBanner">
+          <span className="btnSpinner" /> Establishing connection to {credentials.server}…
+        </div>
+      )}
+
+      {/* ── KPI strip ── */}
+      <section className="kpiStrip" aria-label="Key metrics">
+        <div className="kpiGroup">
+          <div className="kpiGroupLabel">Calls today</div>
+          <div className="kpiGroupCards">
+            <KpiCard label="Total" value={totalCalls} sub="answered + abandoned" />
+            <KpiCard label="Answered" value={completed} variant="ok" />
+            <KpiCard label="Abandoned" value={abandoned} variant="fail" sub="hung up in queue" />
+            <KpiCard label="Abandon rate" value={`${abandonRate.toFixed(1)}%`} variant={abandonRate > 10 ? 'fail' : abandonRate > 5 ? 'warn' : 'ok'} sub="target < 5%" />
           </div>
         </div>
         <div className="kpiGroup">
-          <h2>Service</h2>
-          <div className="kpiRow two">
-            <div className="hotKpi service"><span>Service level</span><strong>{Math.round(serviceLevel)}%</strong></div>
-            <div className="hotKpi"><span>Avg wait</span><strong>{formatWait(stats.holdTime)}</strong></div>
+          <div className="kpiGroupLabel">Service</div>
+          <div className="kpiGroupCards">
+            <KpiCard label="Service level" value={`${Math.round(svcLevel)}%`} variant={svcLevel < 80 ? 'fail' : svcLevel < 90 ? 'warn' : 'ok'} />
+            <KpiCard label="Avg wait" value={fmtSeconds(stats.holdTime)} />
           </div>
         </div>
         <div className="kpiGroup">
-          <h2>Live queue</h2>
-          <div className="kpiRow two">
-            <div className="hotKpi waiting"><span>Callers waiting</span><strong>{waiting.length}</strong></div>
-            <div className="hotKpi waiting"><span>Longest wait</span><strong>{formatWait(longestWait)}</strong></div>
+          <div className="kpiGroupLabel">Live queue</div>
+          <div className="kpiGroupCards">
+            <KpiCard label="Waiting" value={waiting.length} variant={waiting.length > 10 ? 'fail' : waiting.length > 4 ? 'warn' : null} />
+            <KpiCard label="Longest wait" value={fmtSeconds(longestWait)} variant={longestWait > 120 ? 'fail' : longestWait > 60 ? 'warn' : null} />
           </div>
         </div>
       </section>
 
-      <section className="hotlineMain">
-        <div className="callStage">
-          <div className="stageColumn callerColumn">
-            <div className="stageHeading">Caller<small>Customer dials in</small></div>
-            <div className="stageBody"><div className="stageNode callerNode"><span>Inbound</span></div></div>
-          </div>
-          <div className="stageColumn hotlineColumn">
-            <div className="stageHeading">Hotline / mobile<small>Answered and greeted</small></div>
-            <div className="stageBody"><div className="stageNode hotlineNode"><strong>{form.server ? 'Deltapath' : 'Hotline'}</strong><span>{form.username || 'Queue line'}</span></div></div>
-          </div>
-          <div className="stageColumn queueColumn">
-            <div className="stageHeading">Queue<small>Callers hold in order</small></div>
-            <div className="stageBody"><div className="queueSlots">
-              {Array.from({ length: 5 }, (_, index) => <div key={index} className={waiting[index] ? 'queueSlot occupied' : 'queueSlot'} />)}
-            </div><div className="queueCount">{waiting.length ? `${waiting.length} caller${waiting.length === 1 ? '' : 's'} waiting` : ''}</div></div>
-          </div>
-          <div className="stageColumn agentsColumn">
-            <div className="stageHeading">Agents<small>Longest-idle available agent gets the call</small></div>
-            <div className="monitorAgents">
-              {(agents.length ? agents : [{ name: 'No live agents', statusCode: '5', paused: false }]).slice(0, 8).map((agent, index) => {
-                const assigned = active.find((call) => call.agent === agent.name || call.agentExt === agent.location);
-                const status = assigned ? 'talking' : agent.paused ? 'away' : ['1', '2'].includes(agent.statusCode) ? 'avail' : 'offline';
-                return (
-                  <div key={`${agent.name}-${index}`} className="monitorAgent" data-status={status}>
-                    <div><strong>{agent.name}</strong><span>{assigned ? 'On call' : agent.paused ? 'On break' : status === 'avail' ? 'Available' : 'Offline'}</span></div>
-                    <small>{agent.location ? `Ext ${agent.location}` : `${agent.callsTaken || 0} calls handled`}</small>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          <div className="flowWires" aria-hidden="true"><i /><i /><i /></div>
-          {waiting.slice(0, 5).map((call, index) => (
-            <div key={`waiting-${call.caller}-${index}`} className="flowToken waitingToken" style={{ '--token-index': index }}>
-              <span>☎</span><b>…{String(call.caller).slice(-4)}</b>
-            </div>
-          ))}
-          {active.slice(0, 5).map((call, index) => (
-            <div key={`active-${call.caller}-${index}`} className={`flowToken ${call.status === 'Ringing' ? 'ringingToken' : 'talkingToken'}`}>
-              <span>☎</span><b>…{String(call.caller).slice(-4)}</b>
-            </div>
-          ))}
-        </div>
+      {/* ── Main grid ── */}
+      <div className="mainGrid">
 
-        <aside className="hotlineSide">
-          <div className="hotlineList">
-            <div className="listHeader">Calls waiting <b>{waiting.length}</b></div>
-            <div className="listLabels"><span>Position</span><span>Caller</span><span>Waiting</span></div>
-            <div className="listRows">
-              {waiting.length ? waiting.slice(0, 5).map((call, index) => (
-                <div className="listRow" key={`${call.caller}-${index}`}><span>#{index + 1}</span><span>{call.caller}</span><span>{call.wait}</span></div>
+        {/* Call flow diagram */}
+        <section className="flowPanel" aria-label="Call flow">
+          <div className="flowHeader">
+            <span className="panelTitle">Call flow</span>
+            <span className="panelSub">Real-time path</span>
+          </div>
+          <div className="flowDiagram">
+            {/* Stage: Caller */}
+            <div className="flowStage">
+              <div className="stageLabelRow"><span className="stageLabel">Caller</span><small>Dials in</small></div>
+              <div className="flowNode flowNode--caller">
+                <div className="flowNodeIcon">☎</div>
+                <div><strong>Inbound</strong><span>PSTN / VoIP</span></div>
+              </div>
+            </div>
+
+            <div className="flowArrow">
+              {waiting.slice(0, 3).map((c, i) => (
+                <div key={i} className="flowToken flowToken--waiting" style={{ '--ti': i }}>
+                  …{String(c.caller).slice(-4)}
+                </div>
+              ))}
+            </div>
+
+            {/* Stage: System */}
+            <div className="flowStage">
+              <div className="stageLabelRow"><span className="stageLabel">System</span><small>Deltapath UC</small></div>
+              <div className="flowNode flowNode--system">
+                <div className="flowNodeIcon flowNodeIcon--system">D</div>
+                <div>
+                  <strong>{credentials.server.replace(/^https?:\/\//, '')}</strong>
+                  <span>{credentials.username}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flowArrow">
+              {active.slice(0, 2).map((c, i) => (
+                <div key={i} className={`flowToken flowToken--${c.status === 'Ringing' ? 'ringing' : 'talking'}`}>
+                  …{String(c.caller).slice(-4)}
+                </div>
+              ))}
+            </div>
+
+            {/* Stage: Queue */}
+            <div className="flowStage">
+              <div className="stageLabelRow"><span className="stageLabel">Queue</span><small>Callers hold</small></div>
+              <div className="flowNode flowNode--queue">
+                <div className="flowQueueSlots">
+                  {Array.from({ length: 5 }, (_, i) => (
+                    <div key={i} className={`queueDot${waiting[i] ? ' queueDot--full' : ''}`} />
+                  ))}
+                </div>
+                <div>
+                  <strong>{waiting.length} waiting</strong>
+                  <span>FIFO queue</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flowArrow flowArrow--long" />
+
+            {/* Stage: Agents */}
+            <div className="flowStage flowStage--agents">
+              <div className="stageLabelRow"><span className="stageLabel">Agents</span><small>Longest-idle answers</small></div>
+              <div className="agentsGrid">
+                {(agents.length
+                  ? agents.slice(0, 8)
+                  : [{ name: 'No agents online', statusCode: '5', paused: false }]
+                ).map((agent, i) => (
+                  <AgentCard key={`${agent.name}-${i}`} agent={agent} activeCalls={active} />
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Side panels */}
+        <aside className="sideStack">
+          {/* Calls waiting */}
+          <div className="listPanel">
+            <div className="listPanelHeader">
+              <span>Calls waiting</span>
+              <span className="listBadge">{waiting.length}</span>
+            </div>
+            <div className="listPanelLabels">
+              <span>#</span><span>Caller</span><span>Wait</span>
+            </div>
+            <div className="listPanelRows">
+              {waiting.length ? waiting.slice(0, 8).map((c, i) => (
+                <div className="listPanelRow" key={`w-${c.caller}-${i}`}>
+                  <span className="rowPos">#{i + 1}</span>
+                  <span className="rowCaller">{c.caller}</span>
+                  <span className="rowWait">{fmtSeconds(c.wait)}</span>
+                </div>
               )) : <div className="listEmpty">No callers waiting</div>}
             </div>
           </div>
-          <div className="hotlineList">
-            <div className="listHeader">Active calls <b>{active.length}</b></div>
-            <div className="listLabels activeLabels"><span>Agent</span><span>Caller</span><span>Status</span></div>
-            <div className="listRows">
-              {active.length ? active.slice(0, 5).map((call, index) => (
-                <div className="listRow activeRow" key={`${call.caller}-${index}`}><span>{call.agent}</span><span>{call.caller}</span><span className="ringingText">{call.status}</span></div>
+
+          {/* Active calls */}
+          <div className="listPanel">
+            <div className="listPanelHeader">
+              <span>Active calls</span>
+              <span className="listBadge listBadge--active">{active.length}</span>
+            </div>
+            <div className="listPanelLabels activeLabels">
+              <span>Agent</span><span>Caller</span><span>Status</span>
+            </div>
+            <div className="listPanelRows">
+              {active.length ? active.slice(0, 8).map((c, i) => (
+                <div className="listPanelRow" key={`a-${c.caller}-${i}`}>
+                  <span className="rowAgent">{c.agent}</span>
+                  <span className="rowCaller">{c.caller}</span>
+                  <span className={`rowStatus rowStatus--${c.status === 'Ringing' ? 'ring' : 'talk'}`}>{c.status}</span>
+                </div>
               )) : <div className="listEmpty">No active calls</div>}
             </div>
           </div>
         </aside>
-      </section>
+      </div>
 
-      <section className="hotlineFooter">
-        <div className="queueStatusPanel">
-          <div className="panelHeader">Queue status <span>Live snapshot</span></div>
-          <div className="statusBars">
-            {Array.from({ length: 8 }, (_, index) => {
-              const height = waiting.length ? Math.min(100, 20 + waiting.length * (index % 3 + 1) * 4) : 8;
-              return <div className="statusBar" key={index}><i style={{ height: `${height}%` }} /><span>{index === 7 ? 'Now' : `${index + 1}h`}</span></div>;
+      {/* ── Footer ── */}
+      <footer className="monitorFooter">
+        {/* Agent status summary */}
+        <div className="footerPanel">
+          <div className="footerPanelHeader">
+            <span className="panelTitle">Agent status</span>
+            <span className="panelSub">{agents.length} agents</span>
+          </div>
+          <div className="agentStatusGrid">
+            <div className="agentStatusTile" data-variant="avail">
+              <strong>{available}</strong><span>Available</span>
+            </div>
+            <div className="agentStatusTile" data-variant="oncall">
+              <strong>{active.length}</strong><span>On call</span>
+            </div>
+            <div className="agentStatusTile" data-variant="away">
+              <strong>{onBreak}</strong><span>On break</span>
+            </div>
+            <div className="agentStatusTile" data-variant="offline">
+              <strong>{offline}</strong><span>Offline</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Queue depth history (animated bars from live waiting count) */}
+        <div className="footerPanel footerPanel--wide">
+          <div className="footerPanelHeader">
+            <span className="panelTitle">Queue depth</span>
+            <span className="panelSub">Last snapshot</span>
+          </div>
+          <div className="depthBars">
+            {Array.from({ length: 10 }, (_, i) => {
+              const h = i === 9
+                ? Math.min(100, waiting.length * 10)
+                : Math.min(100, (waiting.length * (0.4 + (i % 3) * 0.2)) * 10);
+              return (
+                <div className="depthBar" key={i}>
+                  <div className="depthBarFill" style={{ height: `${Math.max(4, h)}%` }} />
+                  <span>{i === 9 ? 'Now' : `${i + 1}h`}</span>
+                </div>
+              );
             })}
           </div>
         </div>
-        <div className="agentStatusPanel">
-          <div className="panelHeader">Agent status <span>{agents.length} live agents</span></div>
-          <div className="statusTiles">
-            <div className="statusTile available"><strong>{available}</strong><span>Available</span></div>
-            <div className="statusTile oncall"><strong>{active.length}</strong><span>On call</span></div>
-            <div className="statusTile break"><strong>{breaking}</strong><span>On break</span></div>
-            <div className="statusTile offline"><strong>{offline}</strong><span>Offline</span></div>
+
+        <div className="footerMeta">
+          <div className="footerMetaRow">
+            <span className="metaDot" />
+            <span>Read-only monitoring</span>
+          </div>
+          <div className="footerMetaRow">
+            <span>Deltapath UC 5.3.1 · DG-100011</span>
+          </div>
+          <div className="footerMetaRow">
+            Polling every {POLL_INTERVAL / 1000}s
           </div>
         </div>
-      </section>
+      </footer>
+
     </div>
   );
 }

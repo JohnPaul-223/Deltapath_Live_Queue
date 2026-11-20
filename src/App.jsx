@@ -1,157 +1,115 @@
-import { useMemo, useState } from 'react';
-import { ReactFlowProvider } from 'reactflow';
-import FlowCanvas from './FlowCanvas.jsx';
+import { useState } from 'react';
 import LiveCallView from './LiveCallView.jsx';
-import { scanServer } from './api.js';
-import { buildGraph } from './graph.js';
-import './app.css';
 
-function CredentialsForm({ form, setForm, onSubmit, loading, disabled, error }) {
-  const [showPassword, setShowPassword] = useState(false);
-  const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
+/* ─── Connect modal ───────────────────────────────────────────────── */
+function ConnectModal({ onConnect, connecting, error }) {
+  const [form, setForm] = useState({ server: '', username: '', password: '', allowInvalidTLS: true });
+  const [showPw, setShowPw] = useState(false);
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const submit = (e) => {
+    e.preventDefault();
+    onConnect(form);
+  };
 
   return (
-    <form onSubmit={onSubmit}>
-      <label>
-        Server address
-        <div className="inputWrap"><span>◎</span><input value={form.server} onChange={set('server')} placeholder="https://uc-server.local" autoComplete="url" /></div>
-      </label>
-      <label>
-        ACL username
-        <div className="inputWrap"><span>♙</span><input value={form.username} onChange={set('username')} placeholder="Enter username" autoComplete="username" /></div>
-      </label>
-      <label>
-        Password
-        <div className="inputWrap">
-          <span>◈</span>
-          <input type={showPassword ? 'text' : 'password'} value={form.password} onChange={set('password')} placeholder="Enter password" autoComplete="current-password" />
-          <button type="button" className="eye" onClick={() => setShowPassword(!showPassword)}>{showPassword ? 'Hide' : 'Show'}</button>
+    <div className="modalBackdrop">
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Connect to Deltapath server">
+        <div className="modalBrand">
+          <div className="modalMark">D</div>
+          <div>
+            <strong>Deltapath Live Queue Monitor</strong>
+            <span>Enter your server credentials to start monitoring</span>
+          </div>
         </div>
-      </label>
-      <label className="tlsOption">
-        <input type="checkbox" checked={form.allowInvalidTLS} onChange={(e) => setForm({ ...form, allowInvalidTLS: e.target.checked })} />
-        Allow private / self-signed certificate
-      </label>
-      {error && <div className="errorBox" role="alert">{error}</div>}
-      <button className="scanButton" disabled={loading || disabled} type="submit">
-        {loading ? <><span className="spinner" /> Mapping server…</> : <>↗ Scan server</>}
-      </button>
-    </form>
-  );
-}
 
-function Topbar({ title, view, setView, canExport, onExport }) {
-  return (
-    <header className="topbar">
-      <div>
-        <span className="eyebrow">DISCOVERY CANVAS</span>
-        <h1>{title}</h1>
-      </div>
-      <div className="actions">
-        <div className="viewSwitch">
-          <button className={view === 'live' ? 'active' : ''} onClick={() => setView('live')}>Live call</button>
-          <button className={view === 'discovery' ? 'active' : ''} onClick={() => setView('discovery')}>Discovery</button>
-        </div>
-        <button onClick={onExport} className="exportButton" disabled={!canExport} title={canExport ? 'Export discovery results as JSON' : 'Run a scan first'}>⇩ Export map</button>
-      </div>
-    </header>
-  );
-}
+        <form onSubmit={submit} noValidate>
+          <div className="modalField">
+            <label htmlFor="ms">Server address</label>
+            <div className="modalInput">
+              <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.2"/><path d="M8 1.5C8 1.5 5.5 4 5.5 8s2.5 6.5 2.5 6.5M8 1.5C8 1.5 10.5 4 10.5 8S8 14.5 8 14.5M1.5 8h13" stroke="currentColor" strokeWidth="1.2"/></svg>
+              <input id="ms" value={form.server} onChange={set('server')} placeholder="https://uc-server.local" autoComplete="url" required />
+            </div>
+          </div>
+          <div className="modalField">
+            <label htmlFor="mu">ACL username</label>
+            <div className="modalInput">
+              <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="5.5" r="2.5" stroke="currentColor" strokeWidth="1.2"/><path d="M2.5 13c0-2.485 2.462-4.5 5.5-4.5s5.5 2.015 5.5 4.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
+              <input id="mu" value={form.username} onChange={set('username')} placeholder="administrator" autoComplete="username" required />
+            </div>
+          </div>
+          <div className="modalField">
+            <label htmlFor="mp">Password</label>
+            <div className="modalInput">
+              <svg viewBox="0 0 16 16" fill="none"><rect x="2.5" y="7" width="11" height="7.5" rx="2" stroke="currentColor" strokeWidth="1.2"/><path d="M5 7V5.5a3 3 0 1 1 6 0V7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
+              <input id="mp" type={showPw ? 'text' : 'password'} value={form.password} onChange={set('password')} placeholder="••••••••" autoComplete="current-password" required />
+              <button type="button" className="eyeBtn" onClick={() => setShowPw((v) => !v)} aria-label={showPw ? 'Hide password' : 'Show password'}>
+                {showPw ? 'Hide' : 'Show'}
+              </button>
+            </div>
+          </div>
+          <label className="modalTls">
+            <input type="checkbox" checked={form.allowInvalidTLS} onChange={(e) => setForm((f) => ({ ...f, allowInvalidTLS: e.target.checked }))} />
+            Allow private / self-signed TLS certificate
+          </label>
 
-function DiscoveryToolbar({ search, setSearch, accessible, total }) {
-  return (
-    <div className="toolbar">
-      <div className="search">
-        <span>⌕</span>
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search resources…" />
-      </div>
-      <div className="stats">
-        <span><b>{accessible}</b> accessible</span>
-        <span><b>{total}</b> probes</span>
+          {error && <div className="modalError" role="alert">{error}</div>}
+
+          <button type="submit" className="connectBtn" disabled={connecting}>
+            {connecting
+              ? <><span className="btnSpinner" /> Connecting…</>
+              : <>Connect &amp; monitor</>}
+          </button>
+        </form>
       </div>
     </div>
   );
 }
 
+/* ─── Root app ────────────────────────────────────────────────────── */
 export default function App() {
-  const [form, setForm] = useState({ server: '', username: '', password: '', allowInvalidTLS: true });
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [scan, setScan] = useState(null);
-  const [search, setSearch] = useState('');
-  const [view, setView] = useState('live');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [credentials, setCredentials] = useState(null);
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState('');
 
-  const results = scan?.results || [];
-
-  const filtered = useMemo(
-    () => results.filter((r) => !search || `${r.group} ${r.label} ${r.method}`.toLowerCase().includes(search.toLowerCase())),
-    [results, search],
-  );
-  const graph = useMemo(() => buildGraph(filtered), [filtered]);
-  const accessible = results.filter((r) => r.ok).length;
-
-  const runScan = async (e) => {
-    e?.preventDefault();
-    setLoading(true);
-    setError('');
-    try {
-      const data = await scanServer(form);
-      setScan(data);
-      setView('discovery');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+  /* Called by the modal; real auth happens inside LiveCallView on mount */
+  const handleConnect = (form) => {
+    if (!form.server || !form.username || !form.password) {
+      setConnectError('Server address, username, and password are all required.');
+      return;
     }
+    setConnectError('');
+    setConnecting(true);
+    setCredentials(form);
   };
 
-  const exportJson = () => {
-    if (!scan) return;
-    const blob = new Blob([JSON.stringify(scan, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'deltapath-map.json';
-    a.click();
-    URL.revokeObjectURL(a.href);
+  /* Called by LiveCallView when the first auth attempt fails */
+  const handleAuthError = (message) => {
+    setConnecting(false);
+    setCredentials(null);
+    setConnectError(message);
   };
+
+  /* Called once LiveCallView reports it is live */
+  const handleConnected = () => setConnecting(false);
+
+  /* Called when user clicks "Disconnect" inside the monitor */
+  const handleDisconnect = () => {
+    setCredentials(null);
+    setConnecting(false);
+    setConnectError('');
+  };
+
+  if (!credentials) {
+    return <ConnectModal onConnect={handleConnect} connecting={connecting} error={connectError} />;
+  }
 
   return (
-    <main className={`shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-      <aside className="sidebar">
-        <div className="brand">
-          <button className="menuButton" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title="Toggle credentials panel">☰</button>
-          <div className="brandMark">D</div>
-          <div className="brandText"><strong>Deltapath</strong><span>API Mapper</span></div>
-        </div>
-        <CredentialsForm form={form} setForm={setForm} onSubmit={runScan} loading={loading} disabled={loading} error={error} />
-        <div className="guideInfo">
-          <div><span className="pulse" /> Read-only scan</div>
-          <strong>DG-100011 · 5.3.1 · GET probes only</strong>
-        </div>
-      </aside>
-
-      <section className={view === 'discovery' && scan ? 'workspace hasToolbar' : 'workspace'}>
-        <Topbar
-          title={scan ? scan.server : 'Deltapath call architecture'}
-          view={view}
-          setView={setView}
-          canExport={!!scan}
-          onExport={exportJson}
-        />
-        {view === 'discovery' && scan && (
-          <DiscoveryToolbar search={search} setSearch={setSearch} accessible={accessible} total={results.length} />
-        )}
-        <div className={`canvas ${view === 'live' ? 'liveCanvas' : ''}`}>
-          <div key={view} className="viewFade">
-            {view === 'live'
-              ? <LiveCallView form={form} />
-              : scan
-                ? <ReactFlowProvider><FlowCanvas graph={graph} /></ReactFlowProvider>
-                : <div className="emptyState"><strong>No discovery data yet</strong><span>Enter your server credentials and run a scan to map the API surface.</span></div>}
-          </div>
-        </div>
-      </section>
-    </main>
+    <LiveCallView
+      credentials={credentials}
+      onAuthError={handleAuthError}
+      onConnected={handleConnected}
+      onDisconnect={handleDisconnect}
+    />
   );
 }
