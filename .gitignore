@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# Python virtualenv
+.venv/
+
+# Vercel
+.vercel/
+
+# local env files
+.env
+.env.local
+.env.*.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.png
+*.pdf
+
+# debug scripts (local only)
+catch-err.mjs
+runtime-before.mjs
+runtime-check.mjs
