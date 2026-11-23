@@ -11,7 +11,7 @@ Usage:
     python wallboard-proxy.py https://10.0.0.5 --insecure      (self-signed certificate)
 
 Then open  http://localhost:8080  (or http://<this-pc-ip>:8080 from the TV).
-Keep queue-wallboard.html in the same folder as this script.
+Keep index.html in the same folder as this script.
 """
 import argparse, http.client, json, os, socket, ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,7 +21,7 @@ ap = argparse.ArgumentParser(description="Deltapath wallboard relay")
 ap.add_argument("target", help="PBX address, e.g. https://pbx.example.com")
 ap.add_argument("--port", type=int, default=8080, help="local port (default 8080)")
 ap.add_argument("--insecure", action="store_true", help="do not verify the PBX TLS certificate")
-ap.add_argument("--page", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "queue-wallboard.html"))
+ap.add_argument("--page", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"))
 args = ap.parse_args()
 
 t = urlparse(args.target if "://" in args.target else "https://" + args.target)
@@ -80,7 +80,7 @@ class Handler(BaseHTTPRequestHandler):
                 with open(args.page, "rb") as f:
                     return self._reply(200, f.read(), "text/html; charset=utf-8")
             except OSError:
-                return self._reply(500, f"Cannot find {args.page}. Keep queue-wallboard.html next to this script.", "text/plain")
+                return self._reply(500, f"Cannot find {args.page}. Keep index.html next to this script.", "text/plain")
         if path.startswith("/__proxy"):
             return self._reply(200, json.dumps({"target": TARGET}))
         if not path.startswith("/RESTful/"):

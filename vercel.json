@@ -2,14 +2,8 @@
   "version": 2,
   "builds": [
     {
-      "src": "queue-wallboard.html",
+      "src": "index.html",
       "use": "@vercel/static"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/queue-wallboard.html"
     }
   ]
 }

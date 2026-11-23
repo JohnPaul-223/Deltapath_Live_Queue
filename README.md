@@ -46,9 +46,10 @@ Edit the queue wallboard HTML file to customize:
 
 ## Files
 
-- `queue-wallboard.html` - Main wallboard interface
+- `index.html` - Main wallboard interface
 - `wallboard-proxy.py` - Local development proxy server (bypasses CORS)
 - `README.md` - This file
+- `VERCEL_DEPLOYMENT.md` - Guide for deploying to Vercel
 
 ## Usage
 
