@@ -3,203 +3,950 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hotline Monitor</title>
+<title>Deltapath UC — Live Queue Monitor</title>
 <style>
+/* ═══════════════════════════════════════════════
+   DESIGN TOKENS
+═══════════════════════════════════════════════ */
 :root{
-  --u:min(1vw,1.78vh);
-  --bg:#0b1418; --panel:#122127; --line:#26414a; --ink:#e9f2f4; --mute:#8da6ae;
-  --ok:#3ecf7a; --talk:#4d8dff; --ring:#b08cff; --brk:#f2c230; --off:#6f8189; --wait:#ff8a4c; --bad:#ff5a5f; --dial:#2cc5b8;
-  --t:1.2s;
+  --u: min(1vw, 1.78vh);
+
+  /* palette */
+  --bg:     #060d12;
+  --bg2:    #0a1520;
+  --panel:  #0d1e2b;
+  --panel2: #0f2334;
+  --line:   #163045;
+  --line2:  #1e3d55;
+  --ink:    #cde8f5;
+  --ink2:   #8ab8d0;
+  --dim:    #4a7a94;
+
+  --ok:     #00e5a0;
+  --ok-dim: #004d37;
+  --talk:   #2d9cff;
+  --talk-dim:#0a2d50;
+  --ring:   #b06cff;
+  --ring-dim:#2e1255;
+  --brk:    #f5b731;
+  --brk-dim:#4a3800;
+  --off:    #3a5a6e;
+  --wait:   #ff7c3a;
+  --wait-dim:#4a1f00;
+  --bad:    #ff4757;
+  --bad-dim:#4a0a10;
+  --dial:   #00d9c8;
+
+  --t: 1.2s;
+  --font: 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Consolas', 'SF Mono', 'Courier New', monospace;
 }
-*{box-sizing:border-box}
-html{font-size:var(--u)}
-body{margin:0;height:100vh;overflow:hidden;background:var(--bg);color:var(--ink);font:.85rem/1.3 "Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-variant-numeric:tabular-nums}
-body.idle{cursor:none}
-.tv{height:100vh;display:grid;grid-template-rows:auto auto minmax(0,1fr) 13rem;gap:.7rem;padding:.8rem 1rem}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:.7rem}
 
-/* header */
-header{display:flex;align-items:center;gap:1.2rem}
-h1{margin:0;font-size:1.7rem;font-weight:700;letter-spacing:-.01em;white-space:nowrap}
-.live{display:inline-flex;align-items:center;gap:.4rem;font-size:.8rem;color:var(--ok);font-weight:600;margin-left:.8rem;vertical-align:.2rem}
-.live::before{content:"";width:.6rem;height:.6rem;border-radius:50%;background:var(--ok);animation:pulse 1.6s infinite}
-@keyframes pulse{50%{opacity:.25}}
-#ticker{flex:1;min-width:0;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.95rem}
-.clock{text-align:right;line-height:1.1}
-.clock b{font-size:2rem;font-weight:700}
-.clock span{display:block;color:var(--mute);font-size:.8rem}
+/* ═══════════════════════════════════════════════
+   BASE
+═══════════════════════════════════════════════ */
+*{ box-sizing: border-box; margin: 0; padding: 0; }
+html{ font-size: var(--u); }
+body{
+  height: 100vh; overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font: .82rem/1.4 var(--font);
+  font-variant-numeric: tabular-nums;
+}
+body.idle{ cursor: none; }
 
-/* KPIs */
-.kpis{display:grid;grid-template-columns:4fr 2fr 2fr;gap:.9rem}
-.grp{min-width:0}
-.grp h2{margin:0 0 .25rem .15rem;font-size:.72rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--mute)}
-.grp .row{display:grid;gap:.7rem;grid-template-columns:repeat(var(--n),1fr)}
-.kpi{padding:.45rem .9rem .5rem}
-.kpi .l{color:var(--mute);font-size:.85rem}
-.kpi b{display:block;font-size:2.7rem;line-height:1.05;font-weight:700}
-.kpi small{color:var(--mute);font-size:.8rem}
-#kAns b{color:var(--talk)} #kAb b,#kRate.bad b{color:var(--bad)} #kWait b,#kLong b{color:var(--wait)} #kSL b{color:var(--ok)} #kSL.bad b{color:var(--brk)}
+/* ═══════════════════════════════════════════════
+   TV SHELL  — header / 3-col body / footer
+═══════════════════════════════════════════════ */
+.tv{
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 3.6rem auto 1fr auto;
+  gap: 0;
+}
 
-/* stage */
-#stage{position:relative;display:grid;grid-template-columns:.75fr 1fr .95fr 2.6fr;gap:1.4rem;padding:.7rem 1.1rem;min-height:0}
-.col{display:flex;flex-direction:column;min-height:0;position:relative;z-index:1}
-.colhead{font-size:1.05rem;font-weight:700;margin-bottom:.4rem}
-.colhead small{display:block;font-weight:400;font-size:.78rem;color:var(--mute)}
-.body{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center}
-.node{border:.12rem solid var(--line);border-radius:.7rem;padding:.7rem;background:#0f1c21}
-#nHot{border-color:var(--dial)}
-.nums{font-size:.95rem;color:var(--mute);text-align:center}
-.pad{width:4.6rem;height:1.7rem;border:.1rem dashed var(--line);border-radius:1rem;margin:.5rem auto 0}
-.slots{display:flex;flex-direction:column;gap:.45rem;align-items:center}
-.slots .pad{margin:0;position:relative}
-.slots .pad.head::after{content:"next";position:absolute;left:5.2rem;top:.2rem;font-size:.75rem;color:var(--mute)}
-.qcount{margin-top:.5rem;text-align:center;font-size:.85rem;color:var(--wait);font-weight:600;min-height:1.2rem}
-.agents{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:minmax(0,1fr);gap:.6rem}
-.agent{--c:var(--off);border:.14rem solid var(--c);border-radius:.7rem;padding:.3rem .8rem;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;column-gap:.6rem;background:#0f1c21;background:color-mix(in srgb,var(--c) 9%,#0f1c21);cursor:pointer;min-height:0;transition:border-color .3s,background .3s}
-.agent[data-s=avail]{--c:var(--ok)} .agent[data-s=ringing]{--c:var(--ring)} .agent[data-s=talking]{--c:var(--talk)}
-.agent[data-s=away]{--c:var(--brk)} .agent[data-s=offline]{--c:var(--off);opacity:.65}
-.agent .nm{font-weight:700;font-size:1.1rem;display:flex;align-items:center;gap:.5rem}
-.agent .st,.agent .hd{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.agent .nm::before{content:"";width:.7rem;height:.7rem;border-radius:50%;background:var(--c);flex:none}
-.agent .st{color:var(--c);font-weight:600;font-size:.95rem}
-.agent .hd{color:var(--mute);font-size:.75rem}
-.agent .pad{grid-column:2;grid-row:1/4;margin:0}
-.legend{position:absolute;left:1.1rem;bottom:.5rem;display:flex;gap:1rem;font-size:.75rem;color:var(--mute);z-index:1}
-.legend i{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:.35rem}
-#wires{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
-#wires path{fill:none;stroke:var(--line);stroke-width:2;stroke-dasharray:5 6;animation:flow 2.4s linear infinite}
-@keyframes flow{to{stroke-dashoffset:-11}}
+/* ═══════════════════════════════════════════════
+   TOPBAR
+═══════════════════════════════════════════════ */
+.topbar{
+  display: flex; align-items: center; gap: 1.2rem;
+  padding: 0 1.4rem;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--line2);
+}
+.topbar-brand{
+  display: flex; align-items: center; gap: .7rem;
+  flex-shrink: 0;
+}
+.topbar-mark{
+  width: 2rem; height: 2rem; border-radius: .4rem;
+  background: linear-gradient(135deg, #1a6fff, #0a3fa0);
+  display: grid; place-items: center;
+  font-weight: 800; font-size: 1.1rem; color: #fff;
+}
+.topbar-title{
+  display: flex; flex-direction: column; gap: .05rem;
+}
+.topbar-title strong{
+  font-size: .78rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--ink);
+}
+.topbar-title span{
+  font-size: .65rem; color: var(--dim); letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.topbar-sep{
+  width: 1px; height: 1.4rem; background: var(--line2); flex-shrink: 0;
+}
+.live-badge{
+  display: inline-flex; align-items: center; gap: .4rem;
+  font-size: .68rem; font-weight: 700; letter-spacing: .1em;
+  color: var(--ok);
+}
+.live-badge::before{
+  content: ''; width: .55rem; height: .55rem; border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 .2rem color-mix(in srgb, var(--ok) 25%, transparent);
+  animation: livepulse 1.6s ease-out infinite;
+}
+@keyframes livepulse{
+  0%  { box-shadow: 0 0 0 0   color-mix(in srgb, var(--ok) 50%, transparent); }
+  70% { box-shadow: 0 0 0 .5rem color-mix(in srgb, var(--ok) 0%, transparent); }
+  100%{ box-shadow: 0 0 0 0   color-mix(in srgb, var(--ok) 0%, transparent); }
+}
+#ticker{
+  flex: 1; min-width: 0;
+  font-size: .72rem; color: var(--dim);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.topbar-updated{
+  font-size: .68rem; color: var(--dim); letter-spacing: .04em;
+  white-space: nowrap;
+}
+.topbar-clock{
+  text-align: right; flex-shrink: 0;
+  display: flex; flex-direction: column; align-items: flex-end;
+}
+.topbar-clock b{ font-size: 1.3rem; font-weight: 700; font-family: var(--mono); line-height: 1; }
+.topbar-clock span{ font-size: .6rem; color: var(--dim); letter-spacing: .04em; margin-top: .1rem; }
+.qh{
+  --c: var(--ok);
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: .4rem;
+  padding: .2rem .8rem; border-radius: 2rem;
+  font-size: .68rem; font-weight: 800; letter-spacing: .08em;
+  border: 1px solid var(--c); color: var(--c);
+  background: color-mix(in srgb, var(--c) 10%, transparent);
+  white-space: nowrap;
+}
+.qh::before{
+  content: ''; width: .55rem; height: .55rem; border-radius: 50%;
+  background: var(--c);
+}
+.qh[data-s=warn]{ --c: var(--brk); }
+.qh[data-s=crit]{ --c: var(--bad); animation: critblink .9s ease-in-out infinite; }
+@keyframes critblink{ 0%,100%{opacity:1;} 50%{opacity:.55;} }
 
-/* tokens */
-.tok{position:absolute;left:0;top:0;width:4.6rem;height:1.7rem;border-radius:1rem;color:#04141a;font-weight:700;font-size:.8rem;
-  display:flex;align-items:center;justify-content:center;gap:.3rem;z-index:5;box-shadow:0 .1rem .5rem rgba(0,0,0,.5);
-  transition:transform var(--t) cubic-bezier(.45,.05,.25,1),opacity .7s ease,background .4s ease;opacity:0;will-change:transform,opacity;backface-visibility:hidden}
-.tok.show{opacity:1}
-.tok svg{width:.9rem;height:.9rem;fill:#04141a}
-.tok[data-s=dialing]{background:var(--dial)} .tok[data-s=waiting]{background:var(--wait)}
-.tok[data-s=ringing]{background:var(--ring);box-shadow:0 0 0 .25rem rgba(176,140,255,.28),0 .1rem .5rem rgba(0,0,0,.5)} .tok[data-s=talking]{background:var(--talk)}
-.tok[data-s=abandoned]{background:var(--bad)}
+/* ═══════════════════════════════════════════════
+   KPI STRIP
+═══════════════════════════════════════════════ */
+.kpis{
+  display: grid;
+  grid-template-columns: 4fr 2fr 2fr;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg2);
+}
+.kpi-group{
+  padding: .55rem 1rem .6rem;
+  border-right: 1px solid var(--line);
+}
+.kpi-group:last-child{ border-right: 0; }
+.kpi-group-label{
+  font-size: .58rem; font-weight: 700; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--dim);
+  margin-bottom: .4rem;
+  display: flex; align-items: center; gap: .4rem;
+}
+.kpi-group-label::before{
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line2));
+}
+.kpi-row{
+  display: grid; gap: .5rem;
+  grid-template-columns: repeat(var(--n, 1), 1fr);
+}
+.kpi{
+  padding: .4rem .7rem .45rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: .5rem;
+  min-width: 0;
+}
+.kpi-lbl{ display: block; font-size: .6rem; color: var(--ink2); margin-bottom: .15rem; }
+.kpi-val{
+  display: block; font-family: var(--mono);
+  font-size: 2rem; font-weight: 700; line-height: 1.05;
+  color: var(--ink);
+}
+.kpi-sub{ display: block; font-size: .58rem; color: var(--dim); margin-top: .1rem; }
 
-/* footer */
-.foot{display:grid;grid-template-columns:1.7fr 1fr;gap:.7rem;min-height:0}
-.chart{padding:.5rem .9rem .4rem;display:flex;flex-direction:column;min-height:0}
-.ph{display:flex;justify-content:space-between;align-items:baseline;font-weight:700;font-size:1.05rem;margin-bottom:.3rem}
-.ph span{font-weight:400;font-size:.78rem;color:var(--mute)}
-.ph i{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin:0 .3rem 0 .8rem}
-#plot{flex:1;min-height:0;display:flex;gap:.7rem}
-.bcol{flex:1;min-width:0;display:flex;flex-direction:column}
-.bcol .tot{text-align:center;font-weight:700;font-size:.85rem;height:1.2rem}
-.bcol .box{flex:1;position:relative;min-height:0}
-.stack{position:absolute;left:18%;right:18%;bottom:0;display:flex;flex-direction:column-reverse;border-radius:.3rem .3rem 0 0;overflow:hidden;min-height:.15rem}
-.stack i{display:block;min-height:0} .stack .an{background:var(--talk)} .stack .ab{background:var(--bad)}
-.bcol .lbl{text-align:center;color:var(--mute);font-size:.8rem;height:1.2rem;line-height:1.2rem}
-.bcol.now .lbl{color:var(--ink);font-weight:700}
-.status{padding:.5rem .9rem;display:flex;flex-direction:column;min-height:0}
-.tiles{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:.6rem}
-.tile{border-left:.3rem solid var(--c);background:#0f1c21;border-radius:.5rem;padding:.1rem .8rem;display:flex;align-items:center;gap:.8rem}
-.tile b{font-size:2.6rem;color:var(--c);line-height:1}
-.tile span{font-size:1rem;font-weight:600}
-.t-ok{--c:var(--ok)} .t-talk{--c:var(--talk)} .t-brk{--c:var(--brk)} .t-off{--c:var(--off)}
+/* KPI value colors */
+#kAns  .kpi-val{ color: var(--talk); }
+#kAb   .kpi-val,
+#kRate.bad .kpi-val{ color: var(--bad); }
+#kWait .kpi-val,
+#kLong .kpi-val{ color: var(--wait); }
+#kSL   .kpi-val{ color: var(--ok); }
+#kSL.bad .kpi-val{ color: var(--brk); }
 
-.main{display:grid;grid-template-columns:2.35fr 1fr;gap:.7rem;min-height:0}
-.side{display:grid;grid-template-rows:1fr 1fr;gap:.7rem;min-height:0}
-.list{padding:.5rem .9rem;display:flex;flex-direction:column;min-height:0;overflow:hidden}
-.list .ph b{display:inline-block;min-width:1.6rem;margin-left:.5rem;text-align:center;background:var(--line);border-radius:1rem;padding:0 .5rem;font-size:.9rem}
-.rows{flex:1;min-height:0;display:flex;flex-direction:column;gap:.25rem;overflow:hidden}
-.lr{display:grid;grid-template-columns:2.2rem 1fr auto;gap:.6rem;align-items:center;background:#0f1c21;border-radius:.4rem;padding:.2rem .6rem;font-size:.95rem}
-.lr.act{grid-template-columns:1fr 1fr auto}
-.lr.h{background:none;color:var(--mute);font-size:.72rem;padding-top:0;padding-bottom:0;text-transform:uppercase;letter-spacing:.06em}
-.lr .w{font-weight:700;text-align:right} .lr .w.warn{color:var(--brk)} .lr .w.crit{color:var(--bad)}
-.lr .r{color:var(--ring)}
-.empty{color:var(--mute);margin:auto;font-size:.95rem}
-.qh{--c:var(--ok);display:flex;align-items:center;gap:.5rem;padding:.25rem 1rem;border-radius:2rem;font-weight:700;font-size:.95rem;border:.12rem solid var(--c);color:var(--c);background:#0f1c21;white-space:nowrap;letter-spacing:.04em}
-.qh::before{content:"";width:.7rem;height:.7rem;border-radius:50%;background:var(--c)}
-.qh[data-s=warn]{--c:var(--brk)} .qh[data-s=crit]{--c:var(--bad);animation:pulse 1s infinite}
+/* ═══════════════════════════════════════════════
+   BODY — 3-column grid
+═══════════════════════════════════════════════ */
+.body-grid{
+  display: grid;
+  grid-template-columns: 1.15fr 1.6fr 1fr;
+  min-height: 0;
+  border-bottom: 1px solid var(--line);
+}
+.body-col{
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--line);
+  min-height: 0; overflow: hidden;
+}
+.body-col:last-child{ border-right: 0; }
+.col-header{
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .45rem 1rem .4rem;
+  background: var(--panel2);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.col-title{
+  font-size: .64rem; font-weight: 800; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink);
+}
+.col-sub{ font-size: .58rem; color: var(--dim); letter-spacing: .04em; }
 
-/* hidden controls */
-.ctrl{position:fixed;right:1rem;top:4.6rem;z-index:20;background:#0b1418ee;border:1px solid var(--line);border-radius:.7rem;padding:.7rem .9rem;display:flex;flex-direction:column;gap:.5rem;opacity:0;pointer-events:none;transition:opacity .3s;font-size:.85rem}
-body.show .ctrl{opacity:1;pointer-events:auto}
-.ctrl label{display:flex;gap:.4rem;align-items:center;color:var(--mute)}
-.ctrl button,.ctrl select{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:.4rem;padding:.3rem .7rem;cursor:pointer}
-.ctrl .hint{color:var(--mute);font-size:.75rem}
-@media (prefers-reduced-motion:reduce){#wires path,.live::before,.qh[data-s=crit]{animation:none}:root{--t:.01s}}
+/* ═══════════════════════════════════════════════
+   COL 1 — INBOUND & QUEUE
+═══════════════════════════════════════════════ */
+.col1-inner{
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  gap: .5rem; padding: .7rem .9rem;
+}
+
+/* Flow stage — compact vertical layout */
+#stage{
+  position: relative;
+  display: flex; flex-direction: column; gap: .5rem;
+  min-height: 0;
+}
+.flow-row{
+  display: flex; align-items: center; gap: .5rem; min-width: 0;
+}
+.flow-label{
+  font-size: .58rem; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--dim);
+  width: 4rem; flex-shrink: 0;
+}
+.node{
+  flex: 1; min-width: 0;
+  border: 1px solid var(--line2);
+  border-radius: .5rem; padding: .4rem .7rem;
+  background: var(--panel);
+  display: flex; align-items: center; gap: .5rem;
+  position: relative;
+}
+.node-icon{
+  width: 1.8rem; height: 1.8rem; border-radius: 50%;
+  display: grid; place-items: center; flex-shrink: 0;
+  background: var(--panel2); font-size: 1rem;
+}
+#nHot{ border-color: var(--dial); }
+#nHot .node-icon{
+  background: color-mix(in srgb, var(--dial) 15%, var(--panel));
+  color: var(--dial);
+}
+.node-text strong{ display: block; font-size: .78rem; font-weight: 700; }
+.node-text span{ display: block; font-size: .6rem; color: var(--dim); }
+.nums{ font-size: .68rem; color: var(--dim); }
+
+/* Queue slots vertical */
+.queue-wrap{ flex: 1; min-height: 0; }
+.slots{ display: flex; flex-direction: column; gap: .3rem; }
+.pad{
+  width: 100%; height: 1.5rem;
+  border: 1px dashed var(--line2); border-radius: 1rem;
+  position: relative;
+}
+.pad.head::after{
+  content: 'next'; position: absolute;
+  right: .5rem; top: 50%; transform: translateY(-50%);
+  font-size: .6rem; color: var(--dim);
+}
+.qcount{
+  margin-top: .35rem; font-size: .72rem;
+  color: var(--wait); font-weight: 700; min-height: 1rem;
+  text-align: center;
+}
+
+/* Queue stats row */
+.queue-stat-row{
+  display: flex; gap: .4rem; margin-top: .2rem;
+}
+.queue-stat{
+  flex: 1; padding: .3rem .5rem;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: .4rem; text-align: center;
+}
+.queue-stat .qs-lbl{ display: block; font-size: .55rem; color: var(--dim); }
+.queue-stat .qs-val{
+  display: block; font-family: var(--mono);
+  font-size: 1.1rem; font-weight: 700; color: var(--ink);
+}
+
+/* SVG wires — hidden in this layout, kept for token positioning */
+#wires{ display: none; }
+
+/* ═══════════════════════════════════════════════
+   COL 2 — AGENT ROSTER
+═══════════════════════════════════════════════ */
+.col2-inner{
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  padding: .6rem .8rem;
+  gap: .5rem;
+  overflow: hidden;
+}
+
+/* Caller-to-agent assignment visualizer */
+.assignment-band{
+  display: flex; gap: .5rem; align-items: stretch;
+  flex-shrink: 0;
+}
+.assignment-col{
+  flex: 1; display: flex; flex-direction: column; gap: .3rem;
+}
+.assignment-col-label{
+  font-size: .56rem; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--dim);
+  margin-bottom: .15rem;
+}
+.assign-node{
+  padding: .3rem .6rem;
+  background: var(--panel); border: 1px solid var(--line2);
+  border-radius: .4rem; font-size: .68rem;
+  display: flex; align-items: center; gap: .4rem;
+}
+.assign-node-dot{
+  width: .6rem; height: .6rem; border-radius: 50%; flex-shrink: 0;
+}
+.assign-arrow{
+  display: flex; align-items: center; color: var(--dim); font-size: .9rem;
+  padding-top: 1rem;
+}
+
+/* Agent grid */
+.agents-label{
+  font-size: .58rem; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--dim);
+  margin-bottom: .1rem;
+}
+.agents{
+  flex: 1; min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-auto-rows: minmax(0, 1fr);
+  gap: .4rem;
+}
+.agent{
+  --c: var(--off);
+  border: 1px solid var(--c);
+  border-radius: .5rem;
+  padding: .3rem .6rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .4rem;
+  background: color-mix(in srgb, var(--c) 8%, var(--panel));
+  cursor: pointer; min-height: 0;
+  transition: border-color .3s, background .3s;
+}
+.agent[data-s=avail]  { --c: var(--ok);   }
+.agent[data-s=ringing]{ --c: var(--ring);  }
+.agent[data-s=talking]{ --c: var(--talk);  }
+.agent[data-s=away]   { --c: var(--brk);   }
+.agent[data-s=offline]{ --c: var(--off); opacity: .55; }
+.agent .nm{
+  font-weight: 700; font-size: .82rem;
+  display: flex; align-items: center; gap: .4rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.agent .nm::before{
+  content: ''; width: .55rem; height: .55rem; border-radius: 50%;
+  background: var(--c); flex-shrink: 0;
+}
+.agent .st{
+  color: var(--c); font-weight: 600; font-size: .66rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.agent .hd{
+  color: var(--dim); font-size: .58rem;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.agent .pad{
+  grid-column: 2; grid-row: 1 / 4;
+  width: 2.4rem; height: 1rem;
+  border: 1px dashed var(--line2); border-radius: 1rem;
+  margin: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   COL 3 — METRICS
+═══════════════════════════════════════════════ */
+.col3-inner{
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  gap: .5rem; padding: .6rem .8rem;
+  overflow: hidden;
+}
+
+/* Traffic counters */
+.traffic-row{
+  display: flex; gap: .4rem; flex-shrink: 0;
+}
+.traffic-box{
+  flex: 1; padding: .4rem .6rem;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: .5rem; text-align: center;
+}
+.traffic-box .tb-lbl{ display: block; font-size: .55rem; color: var(--dim); margin-bottom: .1rem; }
+.traffic-box .tb-val{
+  font-family: var(--mono); font-size: 1.8rem;
+  font-weight: 700; line-height: 1; color: var(--ink);
+}
+.traffic-box.waiting .tb-val{ color: var(--wait); }
+.traffic-box.oncall  .tb-val{ color: var(--talk); }
+.traffic-active-label{
+  font-size: .58rem; color: var(--dim); text-align: center;
+  margin-top: .15rem; font-weight: 600;
+}
+
+/* Bar chart */
+.chart-panel{
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  padding: .4rem .6rem .3rem;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: .5rem; overflow: hidden;
+}
+.chart-header{
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: .3rem; flex-shrink: 0;
+}
+.chart-title{ font-size: .62rem; font-weight: 700; }
+.chart-legend{
+  display: flex; gap: .6rem; font-size: .56rem; color: var(--dim);
+}
+.chart-legend i{
+  display: inline-block; width: .5rem; height: .5rem;
+  border-radius: .15rem; margin-right: .25rem; vertical-align: middle;
+}
+#plot{ flex: 1; min-height: 0; display: flex; gap: .4rem; }
+.bcol{ flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.bcol .tot{ text-align: center; font-weight: 700; font-size: .6rem; height: .9rem; line-height: .9rem; color: var(--dim); }
+.bcol .box{ flex: 1; position: relative; min-height: 0; }
+.stack{
+  position: absolute; left: 15%; right: 15%; bottom: 0;
+  display: flex; flex-direction: column-reverse;
+  border-radius: .2rem .2rem 0 0; overflow: hidden; min-height: .1rem;
+}
+.stack i{ display: block; min-height: 0; }
+.stack .an{ background: var(--talk); opacity: .75; }
+.stack .ab{ background: var(--bad); opacity: .75; }
+.bcol .lbl{ text-align: center; color: var(--dim); font-size: .58rem; height: .9rem; line-height: .9rem; }
+.bcol.now .lbl{ color: var(--ink); font-weight: 700; }
+.bcol.now .stack .an{ opacity: 1; }
+
+/* Service level ring-ish widget */
+.sl-panel{
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: .7rem;
+  padding: .4rem .7rem;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: .5rem;
+}
+.sl-ring{
+  position: relative; width: 3rem; height: 3rem; flex-shrink: 0;
+}
+.sl-ring svg{ width: 100%; height: 100%; transform: rotate(-90deg); }
+.sl-ring circle{
+  fill: none; stroke-width: 3;
+  r: 12; cx: 16; cy: 16;
+}
+.sl-ring .track{ stroke: var(--line2); }
+.sl-ring .fill { stroke: var(--ok); stroke-linecap: round; transition: stroke-dashoffset .6s; }
+.sl-ring.bad .fill{ stroke: var(--brk); }
+.sl-ring-val{
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  font-family: var(--mono); font-size: .72rem; font-weight: 700;
+  color: var(--ok);
+}
+.sl-ring.bad .sl-ring-val{ color: var(--brk); }
+.sl-info{ flex: 1; min-width: 0; }
+.sl-title{ font-size: .6rem; font-weight: 700; color: var(--ink2); margin-bottom: .2rem; }
+.sl-abandon{ font-size: .62rem; color: var(--dim); }
+.sl-abandon b{ color: var(--bad); font-family: var(--mono); }
+
+/* ═══════════════════════════════════════════════
+   SIDE LISTS (calls waiting / active)
+   — now part of col 1 bottom
+═══════════════════════════════════════════════ */
+.list-panels{
+  display: grid; grid-template-columns: 1fr 1fr; gap: .5rem;
+  flex-shrink: 0;
+}
+.list-panel{
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: .5rem; padding: .4rem .6rem;
+  display: flex; flex-direction: column; overflow: hidden;
+  max-height: 8rem;
+}
+.list-ph{
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: .64rem; font-weight: 700; margin-bottom: .3rem; flex-shrink: 0;
+}
+.list-ph b{
+  font-family: var(--mono); font-size: .7rem;
+  background: var(--line); border-radius: 1rem;
+  padding: .05rem .4rem; min-width: 1.4rem; text-align: center;
+}
+.list-hdrs{
+  display: grid; gap: .3rem; align-items: center;
+  font-size: .54rem; color: var(--dim); letter-spacing: .06em;
+  text-transform: uppercase; padding: 0 .2rem; flex-shrink: 0;
+}
+.list-hdrs.w{ grid-template-columns: 2rem 1fr auto; }
+.list-hdrs.a{ grid-template-columns: 1fr 1fr auto; }
+.rows{
+  flex: 1; min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column; gap: .2rem;
+  margin-top: .2rem;
+}
+.lr{
+  display: grid; gap: .3rem; align-items: center;
+  background: var(--bg2); border-radius: .3rem;
+  padding: .18rem .4rem; font-size: .66rem; min-height: 0;
+}
+.lr.w-row{ grid-template-columns: 2rem 1fr auto; }
+.lr.a-row{ grid-template-columns: 1fr 1fr auto; }
+.lr.h{
+  background: none; color: var(--dim); font-size: .54rem;
+  padding-top: 0; padding-bottom: 0;
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.lr .w{ font-weight: 700; text-align: right; }
+.lr .w.warn{ color: var(--brk); }
+.lr .w.crit{ color: var(--bad); }
+.lr .r{ color: var(--ring); }
+.empty{ color: var(--dim); margin: auto; font-size: .68rem; padding: .4rem 0; text-align: center; }
+
+/* ═══════════════════════════════════════════════
+   FOOTER — agent status tiles
+═══════════════════════════════════════════════ */
+.footer{
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: 1px solid var(--line);
+  background: var(--bg2);
+}
+.status-tile{
+  --c: var(--off);
+  display: flex; align-items: center; gap: .7rem;
+  padding: .5rem 1.1rem;
+  border-right: 1px solid var(--line);
+}
+.status-tile:last-child{ border-right: 0; }
+.status-tile.t-ok  { --c: var(--ok); }
+.status-tile.t-talk{ --c: var(--talk); }
+.status-tile.t-brk { --c: var(--brk); }
+.status-tile.t-off { --c: var(--off); }
+.tile-icon{
+  width: 2rem; height: 2rem; border-radius: .4rem;
+  display: grid; place-items: center; flex-shrink: 0;
+  background: color-mix(in srgb, var(--c) 15%, var(--panel));
+  font-size: 1.1rem;
+}
+.tile-info{ flex: 1; min-width: 0; }
+.tile-val{
+  font-family: var(--mono); font-size: 1.5rem;
+  font-weight: 700; color: var(--c); line-height: 1;
+}
+.tile-lbl{ font-size: .6rem; color: var(--dim); font-weight: 600; margin-top: .1rem; }
+.footer-meta{
+  /* hidden, only shown when space allows */
+  display: flex; align-items: center; justify-content: flex-end;
+  padding: 0 1.2rem; gap: .8rem;
+  font-size: .58rem; color: var(--dim);
+  border-left: 1px solid var(--line);
+  display: none;
+}
+
+/* ═══════════════════════════════════════════════
+   CALL TOKENS
+═══════════════════════════════════════════════ */
+.tok{
+  position: absolute; left: 0; top: 0;
+  width: 3.8rem; height: 1.4rem;
+  border-radius: 1rem;
+  color: #04141a; font-weight: 700; font-size: .68rem;
+  display: flex; align-items: center; justify-content: center; gap: .25rem;
+  z-index: 5; box-shadow: 0 .1rem .4rem rgba(0,0,0,.5);
+  transition: transform var(--t) cubic-bezier(.45,.05,.25,1), opacity .6s ease, background .4s;
+  opacity: 0; will-change: transform, opacity; backface-visibility: hidden;
+}
+.tok.show{ opacity: 1; }
+.tok svg{ width: .75rem; height: .75rem; fill: #04141a; }
+.tok[data-s=dialing]  { background: var(--dial); }
+.tok[data-s=waiting]  { background: var(--wait); }
+.tok[data-s=ringing]  { background: var(--ring); box-shadow: 0 0 0 .2rem rgba(176,108,255,.3), 0 .1rem .4rem rgba(0,0,0,.5); }
+.tok[data-s=talking]  { background: var(--talk); }
+.tok[data-s=abandoned]{ background: var(--bad); }
+
+/* ═══════════════════════════════════════════════
+   LEGEND
+═══════════════════════════════════════════════ */
+.legend{
+  position: absolute; left: 0; bottom: -.05rem;
+  display: flex; gap: .8rem; font-size: .58rem; color: var(--dim);
+  pointer-events: none; z-index: 1;
+}
+.legend i{
+  display: inline-block; width: .5rem; height: .5rem;
+  border-radius: 50%; margin-right: .25rem; vertical-align: middle;
+}
+
+/* ═══════════════════════════════════════════════
+   CONTROLS OVERLAY
+═══════════════════════════════════════════════ */
+.ctrl{
+  position: fixed; right: .9rem; top: 4rem; z-index: 50;
+  background: #060d12ee; border: 1px solid var(--line2);
+  border-radius: .6rem; padding: .65rem .8rem;
+  display: flex; flex-direction: column; gap: .45rem;
+  opacity: 0; pointer-events: none; transition: opacity .3s;
+  font-size: .75rem; min-width: 12rem;
+  backdrop-filter: blur(8px);
+}
+body.show .ctrl{ opacity: 1; pointer-events: auto; }
+.ctrl label{ display: flex; gap: .4rem; align-items: center; color: var(--ink2); }
+.ctrl button, .ctrl select{
+  font: inherit; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line2); border-radius: .35rem;
+  padding: .3rem .65rem; cursor: pointer;
+  transition: border-color .15s;
+}
+.ctrl button:hover{ border-color: var(--talk); }
+.ctrl-title{
+  font-size: .6rem; font-weight: 700; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--dim); margin-bottom: .1rem;
+}
+.ctrl .hint{ color: var(--dim); font-size: .62rem; }
+
+@media (prefers-reduced-motion: reduce){
+  .live-badge::before, .qh[data-s=crit], #wires path{ animation: none; }
+  :root{ --t: .01s; }
+}
 </style>
 </head>
 <body>
 <div class="tv">
-  <header>
-    <h1>Hotline Monitor<span class="live">LIVE</span></h1>
+
+  <!-- ════════════════ TOP BAR ════════════════ -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="topbar-mark">D</div>
+      <div class="topbar-title">
+        <strong>Deltapath UC</strong>
+        <span>Live Agent &amp; Queue Monitor</span>
+      </div>
+    </div>
+    <div class="topbar-sep"></div>
+    <span class="live-badge">LIVE</span>
     <div class="qh" id="qh" data-s="ok">QUEUE NORMAL</div>
     <div id="ticker"></div>
-    <div class="clock"><b id="time"></b><span id="date"></span></div>
+    <div class="topbar-updated" id="updatedAt"></div>
+    <div class="topbar-clock">
+      <b id="time"></b>
+      <span id="date"></span>
+    </div>
   </header>
 
+  <!-- ════════════════ KPI STRIP ════════════════ -->
   <div class="kpis">
-    <div class="grp" style="--n:4"><h2>Calls today</h2><div class="row">
-      <div class="panel kpi" id="kTot"><span class="l">Total calls</span><b>0</b><small>answered + abandoned</small></div>
-      <div class="panel kpi" id="kAns"><span class="l">Answered</span><b>0</b><small></small></div>
-      <div class="panel kpi" id="kAb"><span class="l">Abandoned</span><b>0</b><small>hung up in queue</small></div>
-      <div class="panel kpi" id="kRate"><span class="l">Abandon rate</span><b>0%</b><small>target below 5%</small></div>
-    </div></div>
-    <div class="grp" style="--n:2"><h2>Service</h2><div class="row">
-      <div class="panel kpi" id="kSL"><span class="l">Service level</span><b>0%</b><small></small></div>
-      <div class="panel kpi" id="kASA"><span class="l">Avg speed of answer</span><b>0:00</b><small></small></div>
-    </div></div>
-    <div class="grp" style="--n:2"><h2>Live queue</h2><div class="row">
-      <div class="panel kpi" id="kWait"><span class="l">Callers waiting</span><b>0</b><small></small></div>
-      <div class="panel kpi" id="kLong"><span class="l">Longest wait</span><b>0:00</b><small></small></div>
-    </div></div>
-  </div>
-
-  <div class="main">
-  <div class="panel" id="stage">
-    <svg id="wires" aria-hidden="true"></svg>
-    <div class="col"><div class="colhead">Caller<small>Customer dials in</small></div>
-      <div class="body"><div class="node" id="nCaller"><div class="pad" id="padCaller" style="margin-top:0"></div></div></div></div>
-    <div class="col"><div class="colhead">Hotline / mobile<small>Answered and greeted</small></div>
-      <div class="body"><div class="node" id="nHot"><div class="nums">(02) 8555 0100<br>0917 555 0100</div><div class="pad" id="padHot"></div></div></div></div>
-    <div class="col"><div class="colhead">Queue<small>Callers hold in order</small></div>
-      <div class="body"><div class="slots" id="slots"></div><div class="qcount" id="qcount"></div></div></div>
-    <div class="col"><div class="colhead">Agents<small>Longest-idle available agent gets the call. Click an agent to change status.</small></div>
-      <div class="agents" id="agents"></div></div>
-    <div class="legend">
-      <span><i style="background:var(--dial)"></i>Dialing</span><span><i style="background:var(--wait)"></i>Waiting</span>
-      <span><i style="background:var(--ring)"></i>Ringing</span><span><i style="background:var(--talk)"></i>On call</span>
-      <span><i style="background:var(--bad)"></i>Abandoned</span>
+    <div class="kpi-group">
+      <div class="kpi-group-label">Calls today</div>
+      <div class="kpi-row" style="--n:4">
+        <div class="kpi" id="kTot">
+          <span class="kpi-lbl">Total calls</span>
+          <span class="kpi-val">0</span>
+          <span class="kpi-sub">answered + abandoned</span>
+        </div>
+        <div class="kpi" id="kAns">
+          <span class="kpi-lbl">Answered</span>
+          <span class="kpi-val">0</span>
+          <span class="kpi-sub"></span>
+        </div>
+        <div class="kpi" id="kAb">
+          <span class="kpi-lbl">Abandoned</span>
+          <span class="kpi-val">0</span>
+          <span class="kpi-sub">hung up in queue</span>
+        </div>
+        <div class="kpi" id="kRate">
+          <span class="kpi-lbl">Abandon rate</span>
+          <span class="kpi-val">0%</span>
+          <span class="kpi-sub">target below 5%</span>
+        </div>
+      </div>
     </div>
-  </div>
-  <div class="side">
-    <div class="panel list"><div class="ph">Calls waiting<b id="waitN">0</b></div>
-      <div class="lr h"><span>Pos</span><span>Caller</span><span>Waiting</span></div><div class="rows" id="waitRows"></div></div>
-    <div class="panel list"><div class="ph">Active calls<b id="actN">0</b></div>
-      <div class="lr act h"><span>Agent</span><span>Caller</span><span>Duration</span></div><div class="rows" id="actRows"></div></div>
-  </div>
-  </div>
-
-  <div class="foot">
-    <div class="panel chart">
-      <div class="ph">Call volume per hour<span><i style="background:var(--talk)"></i>Answered<i style="background:var(--bad)"></i>Abandoned</span></div>
-      <div id="plot"></div>
+    <div class="kpi-group">
+      <div class="kpi-group-label">Service</div>
+      <div class="kpi-row" style="--n:2">
+        <div class="kpi" id="kSL">
+          <span class="kpi-lbl">Service level</span>
+          <span class="kpi-val">0%</span>
+          <span class="kpi-sub"></span>
+        </div>
+        <div class="kpi" id="kASA">
+          <span class="kpi-lbl">Avg speed of answer</span>
+          <span class="kpi-val">0:00</span>
+          <span class="kpi-sub"></span>
+        </div>
+      </div>
     </div>
-    <div class="panel status">
-      <div class="ph">Agent status<span id="stTot"></span></div>
-      <div class="tiles">
-        <div class="tile t-ok"><b id="cAvail">0</b><span>Available</span></div>
-        <div class="tile t-talk"><b id="cCall">0</b><span>On call</span></div>
-        <div class="tile t-brk"><b id="cBrk">0</b><span>On break</span></div>
-        <div class="tile t-off"><b id="cOff">0</b><span>Offline</span></div>
+    <div class="kpi-group">
+      <div class="kpi-group-label">Live queue</div>
+      <div class="kpi-row" style="--n:2">
+        <div class="kpi" id="kWait">
+          <span class="kpi-lbl">Callers waiting</span>
+          <span class="kpi-val">0</span>
+          <span class="kpi-sub"></span>
+        </div>
+        <div class="kpi" id="kLong">
+          <span class="kpi-lbl">Longest wait</span>
+          <span class="kpi-val">0:00</span>
+          <span class="kpi-sub"></span>
+        </div>
       </div>
     </div>
   </div>
-</div>
 
+  <!-- ════════════════ BODY 3-COL ════════════════ -->
+  <div class="body-grid">
+
+    <!-- COL 1: INBOUND & QUEUE -->
+    <div class="body-col">
+      <div class="col-header">
+        <span class="col-title">Inbound &amp; Queue</span>
+        <span class="col-sub">PSTN / VoIP Trunk</span>
+      </div>
+      <div class="col1-inner">
+
+        <!-- Flow stage -->
+        <div id="stage">
+          <svg id="wires" aria-hidden="true"></svg>
+
+          <div class="flow-row">
+            <span class="flow-label">Inbound</span>
+            <div class="node" id="nCaller">
+              <div class="node-icon">☎</div>
+              <div class="node-text">
+                <strong>PSTN/VoIP Trunk</strong>
+                <span>Incoming calls</span>
+              </div>
+              <div class="pad" id="padCaller" style="display:none"></div>
+            </div>
+          </div>
+
+          <div class="flow-row">
+            <span class="flow-label">Hotline</span>
+            <div class="node" id="nHot">
+              <div class="node-icon">📞</div>
+              <div class="node-text">
+                <strong>(02) 8555 0100</strong>
+                <span class="nums">0917 555 0100</span>
+              </div>
+              <div class="pad" id="padHot" style="display:none"></div>
+            </div>
+          </div>
+
+          <div class="flow-row">
+            <span class="flow-label">Queue</span>
+            <div class="node" style="flex-direction:column; align-items:stretch; gap:.3rem;">
+              <div class="slots" id="slots"></div>
+              <div class="qcount" id="qcount"></div>
+            </div>
+          </div>
+
+          <div class="legend">
+            <span><i style="background:var(--dial)"></i>Dialing</span>
+            <span><i style="background:var(--wait)"></i>Waiting</span>
+            <span><i style="background:var(--ring)"></i>Ringing</span>
+            <span><i style="background:var(--talk)"></i>On call</span>
+            <span><i style="background:var(--bad)"></i>Abandoned</span>
+          </div>
+        </div>
+
+        <!-- Queue stats -->
+        <div class="queue-stat-row">
+          <div class="queue-stat">
+            <span class="qs-lbl">Total calls</span>
+            <span class="qs-val" id="qs-total">24</span>
+          </div>
+          <div class="queue-stat">
+            <span class="qs-lbl">Answered</span>
+            <span class="qs-val" id="qs-ans" style="color:var(--talk)">7</span>
+          </div>
+        </div>
+
+        <!-- Call lists -->
+        <div class="list-panels">
+          <div class="list-panel">
+            <div class="list-ph">Calls waiting <b id="waitN">0</b></div>
+            <div class="list-hdrs w"><span>Pos</span><span>Caller</span><span>Wait</span></div>
+            <div class="rows" id="waitRows"></div>
+          </div>
+          <div class="list-panel">
+            <div class="list-ph">Active calls <b id="actN">0</b></div>
+            <div class="list-hdrs a"><span>Agent</span><span>Caller</span><span>Status</span></div>
+            <div class="rows" id="actRows"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- COL 2: AGENT ROSTER -->
+    <div class="body-col">
+      <div class="col-header">
+        <span class="col-title">Agent Roster &amp; Live Assignment</span>
+        <span class="col-sub" id="stTot">0 agents</span>
+      </div>
+      <div class="col2-inner">
+        <div class="agents-label">Agent status — click to cycle state</div>
+        <div class="agents" id="agents"></div>
+      </div>
+    </div>
+
+    <!-- COL 3: METRICS -->
+    <div class="body-col">
+      <div class="col-header">
+        <span class="col-title">Queue &amp; Service Metrics</span>
+        <span class="col-sub">Last snapshot</span>
+      </div>
+      <div class="col3-inner">
+
+        <!-- Live traffic -->
+        <div class="traffic-row">
+          <div class="traffic-box waiting">
+            <span class="tb-lbl">Callers Waiting</span>
+            <span class="tb-val" id="tc-waiting">0</span>
+          </div>
+          <div class="traffic-box oncall">
+            <span class="tb-lbl">Active Calls</span>
+            <span class="tb-val" id="tc-active">0</span>
+          </div>
+        </div>
+        <div class="traffic-active-label">Live traffic active</div>
+
+        <!-- Bar chart -->
+        <div class="chart-panel">
+          <div class="chart-header">
+            <span class="chart-title">Queue Depth — Last 10 Intervals</span>
+            <div class="chart-legend">
+              <span><i style="background:var(--talk)"></i>Answered</span>
+              <span><i style="background:var(--bad)"></i>Abandoned</span>
+            </div>
+          </div>
+          <div id="plot"></div>
+        </div>
+
+        <!-- Service level -->
+        <div class="sl-panel">
+          <div class="sl-ring" id="slRing">
+            <svg viewBox="0 0 32 32">
+              <circle class="track" r="12" cx="16" cy="16"/>
+              <circle class="fill" id="slArc" r="12" cx="16" cy="16"
+                stroke-dasharray="75.4" stroke-dashoffset="75.4"/>
+            </svg>
+            <div class="sl-ring-val" id="slVal">0%</div>
+          </div>
+          <div class="sl-info">
+            <div class="sl-title">Service Level</div>
+            <div class="sl-abandon">
+              Abandoned: <b id="sl-ab">0</b> &nbsp;|&nbsp;
+              Rate: <b id="sl-rate">0%</b>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div><!-- /body-grid -->
+
+  <!-- ════════════════ FOOTER ════════════════ -->
+  <footer class="footer">
+    <div class="status-tile t-ok">
+      <div class="tile-icon">●</div>
+      <div class="tile-info">
+        <div class="tile-val" id="cAvail">0</div>
+        <div class="tile-lbl">Available</div>
+      </div>
+    </div>
+    <div class="status-tile t-talk">
+      <div class="tile-icon">◉</div>
+      <div class="tile-info">
+        <div class="tile-val" id="cCall">0</div>
+        <div class="tile-lbl">On Call</div>
+      </div>
+    </div>
+    <div class="status-tile t-brk">
+      <div class="tile-icon">◑</div>
+      <div class="tile-info">
+        <div class="tile-val" id="cBrk">0</div>
+        <div class="tile-lbl">On Break</div>
+      </div>
+    </div>
+    <div class="status-tile t-off">
+      <div class="tile-icon">○</div>
+      <div class="tile-info">
+        <div class="tile-val" id="cOff">0</div>
+        <div class="tile-lbl">Offline</div>
+      </div>
+    </div>
+  </footer>
+
+</div><!-- /tv -->
+
+<!-- ════════════════ CONTROLS ════════════════ -->
 <div class="ctrl" id="ctrl">
-  <button id="add">Add a call</button>
+  <div class="ctrl-title">⚙ TV Controls</div>
+  <button id="add">+ Simulate Incoming Call</button>
   <label><input type="checkbox" id="auto" checked> Keep calls coming</label>
   <label><input type="checkbox" id="autoSt" checked> Agent status changes</label>
-  <label>Speed <select id="spd"><option value="0.5">0.5x</option><option value="1" selected>1x</option><option value="2">2x</option></select></label>
+  <label>Speed
+    <select id="spd">
+      <option value="0.5">0.5x</option>
+      <option value="1" selected>1x</option>
+      <option value="2">2x</option>
+    </select>
+  </label>
   <button id="reset">Reset</button>
-  <button id="fs">Full screen (F)</button>
+  <button id="fs">Toggle Agent State</button>
   <span class="hint">Move the mouse to show these controls</span>
 </div>
 
@@ -209,7 +956,7 @@ const stage = $('#stage'), slotsEl = $('#slots'), agentsEl = $('#agents');
 const PHONE = '<svg viewBox="0 0 24 24"><path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1z"/></svg>';
 const SLOTS = 5;
 const STATUS = {avail:'Available', ringing:'Ringing', talking:'On call', away:'On break', offline:'Offline'};
-const WARN_S = 8, CRIT_S = 18, SL_S = 20;   // demo thresholds in seconds (a real queue might use 180 / 300 / 20)
+const WARN_S = 8, CRIT_S = 18, SL_S = 20;
 const REASONS = ['Lunch','Coffee break','Meeting','Training'];
 const NAMES = ['Maria','Jon','Aira','Paolo','Liza','Mark','Joy','Ken'];
 const START = ['avail','avail','avail','avail','away','offline','avail','away'];
@@ -227,7 +974,12 @@ const cur = () => hours[hours.length - 1];
 
 // slots + agents
 const slots = [];
-for (let i = 0; i < SLOTS; i++) { const p = document.createElement('div'); p.className = 'pad' + (i ? '' : ' head'); slotsEl.appendChild(p); slots.push(p); }
+for (let i = 0; i < SLOTS; i++) {
+  const p = document.createElement('div');
+  p.className = 'pad' + (i ? '' : ' head');
+  slotsEl.appendChild(p);
+  slots.push(p);
+}
 const agents = NAMES.map((n, i) => {
   const el = document.createElement('div');
   el.className = 'agent'; el.tabIndex = 0; el.setAttribute('role', 'button');
@@ -261,42 +1013,96 @@ function renderAgent(a) {
   a.hd.textContent = (a.state === 'away' ? a.reason + ' · ' + a.handled + ' handled' : a.handled + ' calls handled');
 }
 
-// stats + chart
+// extra sync for new kpi elements
+function syncExtra() {
+  const ans = hours.reduce((s, x) => s + x.ans, 0);
+  const ab  = hours.reduce((s, x) => s + x.ab,  0);
+  const tot = ans + ab;
+  const wait = queue.length;
+  const actv = agents.filter(a => a.state === 'ringing' || a.state === 'talking').length;
+
+  const qsTot = $('#qs-total'), qsAns = $('#qs-ans');
+  if (qsTot) qsTot.textContent = tot;
+  if (qsAns) qsAns.textContent = ans;
+
+  const tcW = $('#tc-waiting'), tcA = $('#tc-active');
+  if (tcW) tcW.textContent = wait;
+  if (tcA) tcA.textContent = actv;
+
+  // service level ring
+  const sl = tot ? Math.min(100, stat.sl / tot * 100) : 100;
+  const slVal = $('#slVal'), slArc = $('#slArc'), slRing = $('#slRing');
+  if (slVal) slVal.textContent = Math.round(sl) + '%';
+  if (slArc) {
+    const circ = 2 * Math.PI * 12;
+    slArc.setAttribute('stroke-dashoffset', circ * (1 - sl / 100));
+  }
+  if (slRing) slRing.classList.toggle('bad', sl < 80);
+
+  const slAb = $('#sl-ab'), slRate = $('#sl-rate');
+  const ab2 = hours.reduce((s, x) => s + x.ab, 0);
+  const tot2 = hours.reduce((s, x) => s + x.ans + x.ab, 0);
+  if (slAb) slAb.textContent = ab2;
+  if (slRate) slRate.textContent = (tot2 ? (ab2 / tot2 * 100).toFixed(1) : '0') + '%';
+
+  // updated time
+  const upd = $('#updatedAt');
+  if (upd) {
+    const d = new Date();
+    upd.textContent = 'UPDATED ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+  }
+}
+
 function renderStats() {
   const ans = hours.reduce((s, x) => s + x.ans, 0), ab = hours.reduce((s, x) => s + x.ab, 0), tot = ans + ab;
   const rate = tot ? ab / tot * 100 : 0;
-  const set = (id, v, sub) => { $(id + ' b').textContent = v; if (sub !== undefined) $(id + ' small').textContent = sub; };
+  const set = (id, v, sub) => {
+    const el = $(id);
+    if (!el) return;
+    const vEl = el.querySelector('.kpi-val') || el.querySelector('b');
+    if (vEl) vEl.textContent = v;
+    if (sub !== undefined) {
+      const sEl = el.querySelector('.kpi-sub') || el.querySelector('small');
+      if (sEl) sEl.textContent = sub;
+    }
+  };
   set('#kTot', tot); set('#kAns', ans, tot ? Math.round(ans / tot * 100) + '% of calls' : '');
   set('#kAb', ab); set('#kRate', rate.toFixed(1) + '%');
   $('#kRate').classList.toggle('bad', rate > 5);
   const sl = tot ? Math.min(100, stat.sl / tot * 100) : 100;
-  set('#kSL', Math.round(sl) + '%', 'answered within ' + SL_S + 's'); $('#kSL').classList.toggle('bad', sl < 80);
+  set('#kSL', Math.round(sl) + '%', 'answered within ' + SL_S + 's');
+  $('#kSL').classList.toggle('bad', sl < 80);
   set('#kASA', stat.wn ? fmt(stat.wsum / stat.wn) : '0:00', 'avg wait before answer');
   const lw = queue.length ? Date.now() - queue[0].queuedAt : 0;
   set('#kWait', queue.length, queue.length ? 'in queue now' : 'no one waiting');
   set('#kLong', fmt(lw), queue.length ? 'caller …' + queue[0].num.slice(-4) : 'queue is clear');
   const n = s => agents.filter(a => a.state === s).length;
   const avail = n('avail'), call = n('ringing') + n('talking'), brk = n('away'), off = n('offline');
-  $('#cAvail').textContent = avail; $('#cCall').textContent = call; $('#cBrk').textContent = brk; $('#cOff').textContent = off;
+  $('#cAvail').textContent = avail; $('#cCall').textContent = call;
+  $('#cBrk').textContent = brk; $('#cOff').textContent = off;
   $('#stTot').textContent = (agents.length - off) + ' of ' + agents.length + ' online';
   let lvl = 'ok', txt = 'QUEUE NORMAL';
   if (queue.length && lw / 1000 >= CRIT_S) { lvl = 'crit'; txt = 'QUEUE CRITICAL'; }
   else if (queue.length && (lw / 1000 >= WARN_S || !avail)) { lvl = 'warn'; txt = 'QUEUE BUSY'; }
   $('#qh').dataset.s = lvl; $('#qh').textContent = txt;
   renderLists();
+  syncExtra();
 }
+
 function renderLists() {
-  const now = Date.now(), row = (a, b, c, cls) => '<div class="lr"><span>' + a + '</span><span>' + b + '</span><span class="w ' + (cls || '') + '">' + c + '</span></div>';
+  const now = Date.now();
+  const row = (a, b, c, cls) => '<div class="lr w-row"><span>' + a + '</span><span>' + b + '</span><span class="w ' + (cls || '') + '">' + c + '</span></div>';
   const w = queue.slice(0, 5).map((c, i) => { const sec = (now - c.queuedAt) / 1000; return row('#' + (i + 1), c.num, fmt(now - c.queuedAt), sec >= CRIT_S ? 'crit' : sec >= WARN_S ? 'warn' : ''); });
   if (queue.length > 5) w.push('<div class="lr h"><span></span><span>+' + (queue.length - 5) + ' more waiting</span><span></span></div>');
   $('#waitRows').innerHTML = w.length ? w.join('') : '<div class="empty">No callers waiting</div>';
   $('#waitN').textContent = queue.length;
   const act = agents.filter(a => a.call && (a.state === 'ringing' || a.state === 'talking'));
-  const r = act.slice(0, 5).map(a => '<div class="lr act"><span>' + a.name + '</span><span>' + a.call.num + '</span><span class="w ' + (a.state === 'ringing' ? 'r' : '') + '">' + (a.state === 'ringing' ? 'Ringing' : fmt(now - a.since)) + '</span></div>');
+  const r = act.slice(0, 5).map(a => '<div class="lr a-row"><span>' + a.name + '</span><span>' + a.call.num + '</span><span class="w ' + (a.state === 'ringing' ? 'r' : '') + '">' + (a.state === 'ringing' ? 'Ringing' : fmt(now - a.since)) + '</span></div>');
   if (act.length > 5) r.push('<div class="lr h"><span></span><span>+' + (act.length - 5) + ' more</span><span></span></div>');
   $('#actRows').innerHTML = r.length ? r.join('') : '<div class="empty">No active calls</div>';
   $('#actN').textContent = act.length;
 }
+
 function renderChart() {
   const max = Math.max(10, ...hours.map(x => x.ans + x.ab));
   $('#plot').innerHTML = hours.map((x, i) => {
@@ -307,24 +1113,23 @@ function renderChart() {
   }).join('');
 }
 
-// layout
+// layout — tokens anchored to slot pads in col 1
 function place(tok, el, dy = 0) {
   const s = stage.getBoundingClientRect(), r = el.getBoundingClientRect();
-  const x = r.left - s.left + r.width / 2 - tok.offsetWidth / 2, y = r.top - s.top + r.height / 2 - tok.offsetHeight / 2 + dy * rem();
+  const x = r.left - s.left + r.width / 2 - tok.offsetWidth / 2;
+  const y = r.top  - s.top  + r.height / 2 - tok.offsetHeight / 2 + dy * rem();
   tok.style.transform = 'translate3d(' + x + 'px,' + y + 'px,0)';
 }
 function relayout() {
   queue.forEach((c, i) => place(c.tok, slots[Math.min(i, SLOTS - 1)], i >= SLOTS ? (i - SLOTS + 1) * .35 : 0));
   const extra = queue.length - SLOTS;
-  $('#qcount').textContent = queue.length ? queue.length + (queue.length === 1 ? ' caller waiting' : ' callers waiting') + (extra > 0 ? ' (+' + extra + ' not shown)' : '') : '';
+  $('#qcount').textContent = queue.length
+    ? queue.length + (queue.length === 1 ? ' caller waiting' : ' callers waiting') + (extra > 0 ? ' (+' + extra + ' not shown)' : '')
+    : '';
   renderStats();
 }
 function drawWires() {
-  const s = stage.getBoundingClientRect();
-  const R = el => { const r = el.getBoundingClientRect(); return {l: r.left - s.left, r: r.right - s.left, y: r.top - s.top + r.height / 2}; };
-  const A = R($('#nCaller')), B = R($('#nHot')), Q = R(slotsEl), G = R(agentsEl);
-  const c = (x1, y1, x2, y2) => { const m = (x1 + x2) / 2; return '<path d="M' + x1 + ' ' + y1 + ' C' + m + ' ' + y1 + ' ' + m + ' ' + y2 + ' ' + x2 + ' ' + y2 + '"/>'; };
-  $('#wires').innerHTML = c(A.r, A.y, B.l, B.y) + c(B.r, B.y, Q.l, Q.y) + c(Q.r, Q.y, G.l, G.y);
+  // wires hidden in new layout; kept for token placement compatibility
 }
 new ResizeObserver(() => { drawWires(); relayout(); agents.forEach(a => a.call && place(a.call.tok, a.pad)); renderChart(); }).observe(stage);
 
@@ -337,15 +1142,13 @@ async function newCall() {
   stage.appendChild(tok);
   const c = {num, tok, state: 'dialing', queuedAt: 0};
   tok.dataset.s = 'dialing';
-  tok.style.transition = 'none'; place(tok, $('#padCaller')); tok.getBoundingClientRect();
+  tok.style.transition = 'none'; place(tok, slots[0]); tok.getBoundingClientRect();
   tok.style.transition = ''; tok.classList.add('show');
   say('Incoming call from ' + num);
   if (!await sleep(700)) return;
-  inHot++; place(tok, $('#padHot'), (inHot - 1) * .4);
   if (!await sleep(1400)) return;
   say('Hotline answers ' + num + ' and plays the greeting');
   if (!await sleep(700)) return;
-  inHot = Math.max(0, inHot - 1);
   c.state = 'waiting'; tok.dataset.s = 'waiting'; c.queuedAt = Date.now(); queue.push(c); relayout();
   say(num + ' joins the queue, position ' + queue.length);
   const id = setTimeout(() => { timers.delete(id); if (my === epoch && queue.includes(c)) abandon(c); }, rnd(15000, 26000) / speed);
@@ -358,7 +1161,7 @@ function abandon(c) {
   cur().ab++;
   c.state = 'abandoned'; c.tok.dataset.s = 'abandoned';
   say(c.num + ' hung up while waiting: call abandoned');
-  place(c.tok, $('#padCaller'));
+  place(c.tok, slots[0]);
   relayout(); renderChart();
   setTimeout(() => c.tok.classList.remove('show'), 1000 / speed);
   setTimeout(() => c.tok.remove(), 1900 / speed);
@@ -420,11 +1223,11 @@ function init() {
   queue = []; inHot = 0; renderStats(); renderChart(); relayout();
 }
 
-// clock + live timers
+// clock
 function tick() {
   const d = new Date();
   $('#time').textContent = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
-  $('#date').textContent = d.toLocaleDateString([], {weekday: 'long', month: 'long', day: 'numeric'});
+  $('#date').textContent = d.toLocaleDateString([], {weekday: 'long', month: 'long', day: 'numeric'}).toUpperCase();
   if (d.getHours() !== curHour) { curHour = d.getHours(); hours.shift(); hours.push({h: curHour, ans: 0, ab: 0}); renderChart(); }
   agents.forEach(renderAgent); renderStats();
 }
@@ -437,7 +1240,7 @@ $('#autoSt').onchange = scheduleStatus;
 $('#spd').onchange = e => { speed = parseFloat(e.target.value); document.documentElement.style.setProperty('--t', (1.2 / speed) + 's'); scheduleAuto(); scheduleStatus(); };
 $('#reset').onclick = () => {
   epoch++; timers.forEach(clearTimeout); timers.clear(); clearTimeout(autoTimer); clearTimeout(stTimer);
-  document.querySelectorAll('.tok').forEach(t=>t.remove());
+  document.querySelectorAll('.tok').forEach(t => t.remove());
   init(); scheduleAuto(); scheduleStatus(); setTimeout(newCall, 500);
 };
 const toggleFs = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
@@ -449,66 +1252,102 @@ document.addEventListener('mousemove', () => {
   clearTimeout(hideT); hideT = setTimeout(() => { document.body.classList.remove('show'); document.body.classList.add('idle'); }, 3000);
 });
 
-let liveMode=false;
-window.addEventListener('message', event=>{
-  if(event.data?.type!=='deltapath-live') return;
-  if(liveMode===false){
-    liveMode=true;
-  }
+// Live data via postMessage
+let liveMode = false;
+window.addEventListener('message', event => {
+  if (event.data?.type !== 'deltapath-live') return;
+  liveMode = true;
   clearTimeout(autoTimer); clearTimeout(stTimer);
-  const snap=event.data.snapshot||{};
-  applyLiveSnapshot(snap);
+  applyLiveSnapshot(event.data.snapshot || {});
 });
 
-function applyLiveSnapshot(snap){
+function applyLiveSnapshot(snap) {
   document.body.classList.add('live-data');
   clearTimeout(autoTimer); clearTimeout(stTimer);
-  document.querySelectorAll('.tok').forEach(t=>t.remove());
-  const calls=Array.isArray(snap.liveCalls)?snap.liveCalls:(snap.liveCall?[snap.liveCall]:[]);
-  const agentsLive=Array.isArray(snap.liveAgents)?snap.liveAgents:[];
-  const stats=snap.liveStats||{};
-  const waiting=calls.filter(c=>c.status==='Waiting');
-  const active=calls.filter(c=>c.status==='Ringing'||c.status==='Connected');
-  const completed=Number(stats.completed||0), abandoned=Number(stats.abandoned||0);
-  const total=completed+abandoned;
-  const abandonRate=total?abandoned/total*100:0;
-  $('#kTot b').textContent=total;
-  $('#kAns b').textContent=completed;
-  $('#kAb b').textContent=abandoned;
-  $('#kRate b').textContent=abandonRate.toFixed(1)+'%';
-  $('#kRate').classList.toggle('bad',abandonRate>5);
-  $('#kSL b').textContent=Number(stats.serviceLevelPerf||0).toFixed(0)+'%';
-  $('#kWait b').textContent=waiting.length;
-  $('#kLong b').textContent=waiting.length?waiting.map(c=>Number(String(c.wait).replace(/[^0-9.]/g,''))).sort((a,b)=>b-a)[0]+'s':'0:00';
-  $('#waitN').textContent=waiting.length;
-  $('#waitRows').innerHTML=waiting.length?waiting.map((c,i)=>'<div class="lr"><span>#'+(i+1)+'</span><span>'+c.caller+'</span><span class="w">'+c.wait+'</span></div>').join(''):'<div class="empty">No callers waiting</div>';
-  $('#actN').textContent=active.length;
-  $('#actRows').innerHTML=active.length?active.map(c=>'<div class="lr act"><span>'+c.agent+'</span><span>'+c.caller+'</span><span class="w '+(c.status==='Ringing'?'r':'')+'">'+(c.status==='Ringing'?'Ringing':c.wait)+'</span></div>').join(''):'<div class="empty">No active calls</div>';
-  $('#qh').dataset.s=waiting.length>10?'crit':waiting.length>4?'warn':'ok';
-  $('#qh').textContent=waiting.length>10?'QUEUE CRITICAL':waiting.length>4?'QUEUE BUSY':'QUEUE NORMAL';
+  document.querySelectorAll('.tok').forEach(t => t.remove());
+  const calls = Array.isArray(snap.liveCalls) ? snap.liveCalls : (snap.liveCall ? [snap.liveCall] : []);
+  const agentsLive = Array.isArray(snap.liveAgents) ? snap.liveAgents : [];
+  const stats = snap.liveStats || {};
+  const waiting = calls.filter(c => c.status === 'Waiting');
+  const active  = calls.filter(c => c.status === 'Ringing' || c.status === 'Connected');
+  const completed = Number(stats.completed || 0), abandoned = Number(stats.abandoned || 0);
+  const total = completed + abandoned;
+  const abandonRate = total ? abandoned / total * 100 : 0;
 
-  if(agentsLive.length){
-    agentsEl.innerHTML=agentsLive.map((a,i)=>{
-      const paused=a.paused;
-      const state=paused?'away':(['1','2'].includes(a.statusCode)?'avail':'offline');
-      const assigned=active.find(c=>c.agent===a.name||c.agentExt===a.location);
-      const finalState=assigned?'talking':state;
-      return '<div class="agent" data-s="'+finalState+'"><div class="nm">'+a.name+'</div><div class="st">'+(finalState==='talking'?'On call':paused?'On break':finalState==='avail'?'Available':'Offline')+'</div><div class="hd">'+a.callsTaken+' calls taken · '+a.location+'</div><div class="pad"></div></div>'; 
+  const setKpi = (id, v, sub) => {
+    const el = $(id); if (!el) return;
+    const vEl = el.querySelector('.kpi-val'); if (vEl) vEl.textContent = v;
+    if (sub !== undefined) { const sEl = el.querySelector('.kpi-sub'); if (sEl) sEl.textContent = sub; }
+  };
+  setKpi('#kTot', total);
+  setKpi('#kAns', completed);
+  setKpi('#kAb', abandoned);
+  setKpi('#kRate', abandonRate.toFixed(1) + '%');
+  $('#kRate').classList.toggle('bad', abandonRate > 5);
+  const sl = Number(stats.serviceLevelPerf || 0);
+  setKpi('#kSL', sl.toFixed(0) + '%');
+  $('#kSL').classList.toggle('bad', sl < 80);
+  setKpi('#kWait', waiting.length, waiting.length ? 'in queue now' : 'no one waiting');
+  const lw = waiting.length ? Math.max(...waiting.map(c => Number(String(c.wait).replace(/[^0-9.]/g, '')) || 0)) : 0;
+  setKpi('#kLong', fmt(lw * 1000));
+
+  $('#waitN').textContent = waiting.length;
+  $('#waitRows').innerHTML = waiting.length
+    ? waiting.map((c, i) => '<div class="lr w-row"><span>#' + (i+1) + '</span><span>' + c.caller + '</span><span class="w">' + c.wait + '</span></div>').join('')
+    : '<div class="empty">No callers waiting</div>';
+  $('#actN').textContent = active.length;
+  $('#actRows').innerHTML = active.length
+    ? active.map(c => '<div class="lr a-row"><span>' + c.agent + '</span><span>' + c.caller + '</span><span class="w ' + (c.status === 'Ringing' ? 'r' : '') + '">' + (c.status === 'Ringing' ? 'Ringing' : c.wait) + '</span></div>').join('')
+    : '<div class="empty">No active calls</div>';
+
+  $('#qh').dataset.s = waiting.length > 10 ? 'crit' : waiting.length > 4 ? 'warn' : 'ok';
+  $('#qh').textContent = waiting.length > 10 ? 'QUEUE CRITICAL' : waiting.length > 4 ? 'QUEUE BUSY' : 'QUEUE NORMAL';
+
+  if (agentsLive.length) {
+    agentsEl.innerHTML = agentsLive.map((a, i) => {
+      const paused = a.paused;
+      const state = paused ? 'away' : (['1','2'].includes(a.statusCode) ? 'avail' : 'offline');
+      const assigned = active.find(c => c.agent === a.name || c.agentExt === a.location);
+      const finalState = assigned ? 'talking' : state;
+      const statusLabel = finalState === 'talking' ? 'On call' : paused ? 'On break' : finalState === 'avail' ? 'Available' : 'Offline';
+      return '<div class="agent" data-s="' + finalState + '"><div class="nm">' + a.name + '</div><div class="st">' + statusLabel + '</div><div class="hd">' + a.callsTaken + ' calls · ' + a.location + '</div><div class="pad"></div></div>';
     }).join('');
   }
 
-  const avail=agentsLive.filter(a=>!a.paused&&['1','2'].includes(a.statusCode)).length;
-  const onCall=active.length;
-  $('#cAvail').textContent=avail;
-  $('#cCall').textContent=onCall;
-  $('#cBrk').textContent=agentsLive.filter(a=>a.paused).length;
-  $('#cOff').textContent=Math.max(0,agentsLive.length-avail-onCall);
-  $('#stTot').textContent=agentsLive.length+' live agents';
+  const avail  = agentsLive.filter(a => !a.paused && ['1','2'].includes(a.statusCode)).length;
+  const onCall = active.length;
+  $('#cAvail').textContent = avail;
+  $('#cCall').textContent  = onCall;
+  $('#cBrk').textContent   = agentsLive.filter(a => a.paused).length;
+  $('#cOff').textContent   = Math.max(0, agentsLive.length - avail - onCall);
+  $('#stTot').textContent  = agentsLive.length + ' live agents';
 
-  waiting.forEach((c,i)=>{const el=document.createElement('div');el.className='tok show';el.dataset.s='waiting';el.innerHTML=PHONE+'<span>…'+String(c.caller).slice(-4)+'</span>';stage.appendChild(el);place(el,slots[Math.min(i,slots.length-1)]);});
-  active.forEach((c,i)=>{const el=document.createElement('div');el.className='tok show';el.dataset.s=c.status==='Ringing'?'ringing':'talking';el.innerHTML=PHONE+'<span>…'+String(c.caller).slice(-4)+'</span>';stage.appendChild(el);const target=[...agentsEl.querySelectorAll('.agent')][i%Math.max(1,agentsEl.querySelectorAll('.agent').length)]?.querySelector('.pad')||slots[0];place(el,target);});
-  say(calls.length?calls.length+' live queue call(s) received':'No inbound calls currently in queue');
+  const tcW = $('#tc-waiting'), tcA = $('#tc-active');
+  if (tcW) tcW.textContent = waiting.length;
+  if (tcA) tcA.textContent = active.length;
+
+  const slVal = $('#slVal'), slArc = $('#slArc'), slRing = $('#slRing');
+  if (slVal) slVal.textContent = sl.toFixed(0) + '%';
+  if (slArc) { const circ = 2 * Math.PI * 12; slArc.setAttribute('stroke-dashoffset', circ * (1 - sl / 100)); }
+  if (slRing) slRing.classList.toggle('bad', sl < 80);
+  const slAb = $('#sl-ab'), slRate = $('#sl-rate');
+  if (slAb) slAb.textContent = abandoned;
+  if (slRate) slRate.textContent = abandonRate.toFixed(1) + '%';
+
+  const upd = $('#updatedAt');
+  if (upd) { const d = new Date(); upd.textContent = 'UPDATED ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+
+  waiting.forEach((c, i) => { const el = document.createElement('div'); el.className = 'tok show'; el.dataset.s = 'waiting'; el.innerHTML = PHONE + '<span>…' + String(c.caller).slice(-4) + '</span>'; stage.appendChild(el); if (slots[Math.min(i, slots.length - 1)]) place(el, slots[Math.min(i, slots.length - 1)]); });
+  active.forEach((c, i) => { const el = document.createElement('div'); el.className = 'tok show'; el.dataset.s = c.status === 'Ringing' ? 'ringing' : 'talking'; el.innerHTML = PHONE + '<span>…' + String(c.caller).slice(-4) + '</span>'; stage.appendChild(el); const target = [...agentsEl.querySelectorAll('.agent')][i % Math.max(1, agentsEl.querySelectorAll('.agent').length)]?.querySelector('.pad') || slots[0]; place(el, target); });
+
+  say(calls.length ? calls.length + ' live queue call(s) in progress' : 'No inbound calls currently in queue');
 }
+
+// boot
+init();
+scheduleAuto();
+scheduleStatus();
+setTimeout(newCall, 800);
 </script>
 </body>
 </html>
