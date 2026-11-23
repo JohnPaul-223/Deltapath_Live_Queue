@@ -1,0 +1,1575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hotline Queue Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b1220; --panel: #131c2e; --panel2: #192540; --line: #24334f;
+    --text: #e8eef9; --muted: #8fa0bf;
+    --ok: #22c55e; --warn: #f59e0b; --crit: #ef4444; --busy: #3b82f6; --pause: #a78bfa; --off: #5b6783;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; }
+  .app { height: 100vh; display: flex; flex-direction: column; padding: 1.2vh 1.2vw; gap: 1.2vh; }
+
+  /* header */
+  header { display: flex; align-items: center; justify-content: space-between; gap: 2vw; }
+  header h1 { font-size: clamp(18px, 2.6vw, 44px); font-weight: 700; letter-spacing: .02em; }
+  header h1 span { color: var(--muted); font-weight: 400; font-size: .6em; margin-left: .6em; }
+  .right { display: flex; align-items: center; gap: 1.6vw; }
+  .clock { font-size: clamp(18px, 2.6vw, 44px); font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; line-height: 1.1; }
+  .clock small { display: block; font-size: .4em; color: var(--muted); font-weight: 400; }
+  .conn { display: flex; align-items: center; gap: .5em; font-size: clamp(11px, 1.1vw, 18px); color: var(--muted); }
+  .dot { width: .9em; height: .9em; border-radius: 50%; background: var(--off); }
+  .conn.live .dot { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+  .conn.err .dot { background: var(--crit); box-shadow: 0 0 10px var(--crit); }
+
+  /* totals */
+  .totals { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1vw; }
+  .tot { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1vh 1vw; }
+  .tot .l { color: var(--muted); font-size: clamp(10px, 1.05vw, 17px); text-transform: uppercase; letter-spacing: .08em; }
+  .tot .v { font-size: clamp(24px, 3.8vw, 64px); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .tot.warn .v { color: var(--warn); } .tot.crit .v { color: var(--crit); } .tot.ok .v { color: var(--ok); }
+
+  /* queue grid */
+  .grid { flex: 1; min-height: 0; display: grid; gap: 1vw; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-top: .6vh solid var(--ok);
+    border-radius: 14px; padding: 1.2vh 1vw; display: flex; flex-direction: column; gap: 1vh; min-height: 0; overflow: hidden; }
+  .card.warn { border-top-color: var(--warn); }
+  .card.crit { border-top-color: var(--crit); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { background: #2a1620; } }
+
+  .ch { display: flex; justify-content: space-between; align-items: baseline; gap: 1vw; }
+  .ch .name { font-size: clamp(16px, 2vw, 34px); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ch .qid { color: var(--muted); font-size: clamp(10px, 1vw, 16px); }
+
+  .big { display: flex; gap: 1.2vw; }
+  .big > div { flex: 1; background: var(--panel2); border-radius: 10px; padding: .8vh .8vw; }
+  .big .l { color: var(--muted); font-size: clamp(9px, .95vw, 15px); text-transform: uppercase; letter-spacing: .07em; }
+  .big .v { font-size: clamp(26px, 4vw, 70px); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.05; }
+  .card.warn .big .w { color: var(--warn); } .card.crit .big .w { color: var(--crit); }
+
+  .agents { display: flex; gap: .6vw; }
+  .ag { flex: 1; text-align: center; border-radius: 8px; padding: .5vh .2vw; background: var(--panel2); }
+  .ag b { display: block; font-size: clamp(16px, 2.2vw, 38px); font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .ag span { font-size: clamp(9px, .9vw, 14px); color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .ag.a b { color: var(--ok); } .ag.b b { color: var(--busy); } .ag.p b { color: var(--pause); } .ag.o b { color: var(--off); }
+
+  .stats { display: flex; justify-content: space-between; font-size: clamp(10px, 1.05vw, 17px); color: var(--muted); gap: .6vw; flex-wrap: wrap; }
+  .stats b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+  .sec { color: var(--muted); font-size: clamp(9px, .9vw, 14px); text-transform: uppercase; letter-spacing: .08em; }
+  .callers { display: flex; flex-direction: column; gap: .4vh; min-height: 0; overflow: hidden; }
+  .caller { display: flex; justify-content: space-between; gap: 1vw; background: var(--panel2); border-radius: 8px;
+    padding: .4vh .6vw; font-size: clamp(11px, 1.3vw, 22px); font-variant-numeric: tabular-nums; }
+  .caller .pos { color: var(--muted); width: 1.6em; }
+  .caller .who { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .caller .wt { font-weight: 700; }
+  .caller.warn .wt { color: var(--warn); } .caller.crit .wt { color: var(--crit); }
+  .none { color: var(--muted); font-size: clamp(11px, 1.2vw, 20px); padding: .4vh 0; }
+
+  .members { display: flex; flex-wrap: wrap; gap: .4vw; overflow: hidden; min-height: 0; }
+  .chip { display: inline-flex; align-items: center; gap: .35em; background: var(--panel2); border-radius: 999px;
+    padding: .2vh .7vw; font-size: clamp(10px, 1.05vw, 17px); white-space: nowrap; }
+  .chip i { width: .7em; height: .7em; border-radius: 50%; display: inline-block; }
+  .chip.a i { background: var(--ok); } .chip.b i { background: var(--busy); } .chip.r i { background: var(--warn); }
+  .chip.p i { background: var(--pause); } .chip.o i { background: var(--off); }
+  .chip.o { color: var(--muted); }
+
+  .empty { flex: 1; display: grid; place-items: center; color: var(--muted); font-size: clamp(16px, 2vw, 32px); text-align: center; }
+  footer { display: flex; justify-content: space-between; color: var(--muted); font-size: clamp(9px, .9vw, 14px); }
+  .legend span { margin-right: 1.2vw; } .legend i { display: inline-block; width: .7em; height: .7em; border-radius: 50%; margin-right: .3em; }
+
+  /* login screen */
+  .login { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; overflow: auto;
+    background: radial-gradient(1200px 600px at 50% -10%, #1b2140 0%, #0b1020 55%, #070a14 100%); }
+  .login.hide { display: none; }
+  .lcard { width: 100%; max-width: 560px; background: #111827; border: 1px solid #1f2d4a; border-radius: 26px; padding: 44px 48px;
+    box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+  .lhead { display: flex; align-items: center; gap: 20px; margin-bottom: 34px; }
+  .logo { width: 66px; height: 66px; border-radius: 18px; display: grid; place-items: center; font-size: 34px; font-weight: 800; color: #fff;
+    background: linear-gradient(135deg, #6d6bff, #4a3fd1); flex: none; }
+  .lhead h2 { font-size: 22px; font-weight: 700; }
+  .lhead p { color: #8fa0bf; font-size: 16px; margin-top: 4px; }
+  .lcard label.f { display: block; color: #8fa0bf; font-size: 14px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin: 0 0 10px; }
+  .inp { position: relative; margin-bottom: 26px; }
+  .inp svg { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; stroke: #5b6a8a; fill: none; stroke-width: 1.8; }
+  .inp input { width: 100%; height: 66px; background: #1a2336; border: 1px solid #263654; border-radius: 16px; color: #e8eef9;
+    font-size: 19px; padding: 0 20px 0 58px; outline: none; font-family: inherit; }
+  .inp input::placeholder { color: #4a5a7a; }
+  .inp input:focus { border-color: #6d6bff; box-shadow: 0 0 0 3px rgba(109,107,255,.25); }
+  .inp .show { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); background: none; border: 0; color: #9fb0cf;
+    font-size: 16px; font-weight: 600; cursor: pointer; }
+  .chk { display: flex; align-items: center; gap: 12px; color: #9fb0cf; font-size: 16px; margin: -6px 0 14px; cursor: pointer; }
+  .chk input { width: 20px; height: 20px; accent-color: #6d6bff; }
+  .lbtn { width: 100%; height: 68px; margin-top: 14px; border: 0; border-radius: 16px; cursor: pointer; font-size: 20px; font-weight: 700; color: #fff;
+    background: linear-gradient(135deg, #7a78ff, #4a3fd1); font-family: inherit; }
+  .lbtn:disabled { opacity: .6; cursor: wait; }
+  .lerr { display: none; margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: #2a1620; border: 1px solid #5a2433; color: #ffb4bf; font-size: 15px; line-height: 1.45; }
+  .lerr.on { display: block; }
+  .lerr a { color: #c4c2ff; }
+  .lnote { margin-top: 18px; color: #62718f; font-size: 13px; text-align: center; }
+  .disc { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: .4em .9em;
+    font-size: clamp(11px, 1vw, 16px); cursor: pointer; }
+  .disc:hover { color: var(--text); border-color: var(--muted); }
+#detail .pixel-box{
+      background: var(--bg-panel);
+      border: 3px solid var(--border-light);
+      box-shadow:
+        inset 0 0 0 2px var(--border-dark),
+        0 4px 0 rgba(0, 0, 0, 0.45);
+      position: relative;
+    }
+#detail .pixel-card{
+      background: var(--bg-card);
+      border: 2px solid var(--border-light);
+      box-shadow: inset 0 0 0 2px var(--border-dark);
+      position: relative;
+    }
+#detail .font-pixel{
+      font-family: 'Press Start 2P', monospace;
+      letter-spacing: 0.5px;
+    }
+#detail .font-vt{
+      font-family: 'VT323', monospace;
+    }
+#detail #tv-screen{
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 12px 16px 10px 16px;
+      gap: 10px;
+      position: relative;
+    }
+#detail .header-bar{
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      height: 68px;
+      flex-shrink: 0;
+    }
+#detail .header-main{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      background: linear-gradient(90deg, #10182D 0%, #16223F 60%, #10182D 100%);
+    }
+#detail .brand-title{
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: clamp(14px, 1.55vw, 23px);
+      white-space: nowrap;
+    }
+#detail .brand-cyan{
+      color: var(--cyan-bright);
+      text-shadow: 2px 2px 0 #071921;
+    }
+#detail .brand-slash{
+      color: #64748B;
+    }
+#detail .brand-sub{
+      color: #F8FAFC;
+      font-size: clamp(11px, 1.25vw, 18px);
+    }
+#detail .live-status-group{
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 4px;
+    }
+#detail .live-badge{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--green);
+      font-size: clamp(12px, 1.2vw, 18px);
+      text-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+    }
+#detail .live-dot{
+      width: 12px;
+      height: 12px;
+      background: var(--green);
+      box-shadow: 0 0 10px var(--green);
+      animation: pulseDot 1.2s steps(2, end) infinite;
+    }
+@keyframes pulseDot{
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(0.85); }
+    }
+#detail .updated-text{
+      color: var(--text-muted);
+      font-size: 17px;
+      letter-spacing: 1px;
+    }
+#detail .clock-box{
+      width: 260px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 12px;
+      background: #121A30;
+    }
+#detail .clock-date{
+      color: #CBD5E1;
+      font-size: 18px;
+      letter-spacing: 1px;
+    }
+#detail .clock-time{
+      color: #FFFFFF;
+      font-size: 22px;
+      margin-top: 2px;
+      text-shadow: 2px 2px 0 #000;
+    }
+#detail .dashboard-grid{
+      flex: 1;
+      display: grid;
+      grid-template-columns: 270px 1fr 295px;
+      gap: 14px;
+      min-height: 0;
+      position: relative;
+    }
+#detail .col-wrapper{
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 0;
+    }
+#detail .section-header{
+      font-size: 13px;
+      color: #E2E8F0;
+      letter-spacing: 1px;
+      padding-left: 2px;
+      text-shadow: 2px 2px 0 #050811;
+      flex-shrink: 0;
+    }
+#detail .left-panel{
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      min-height: 0;
+    }
+#detail .inbound-banner{
+      background: linear-gradient(180deg, #174950 0%, #10353B 100%);
+      border: 2px solid #2DD4BF;
+      box-shadow: inset 0 0 0 2px #092024;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: relative;
+    }
+#detail .inbound-left{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+#detail .inbound-title{
+      font-size: 14px;
+      color: #FFFFFF;
+      margin-bottom: 4px;
+    }
+#detail .inbound-sub{
+      font-size: 18px;
+      color: #99F6E4;
+    }
+#detail .signal-waves{
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+#detail .wave-bar{
+      width: 4px;
+      background: var(--cyan-bright);
+      animation: wavePulse 0.9s infinite ease-in-out;
+    }
+#detail .wave-bar:nth-child(1){ height: 8px; animation-delay: 0s; }
+#detail .wave-bar:nth-child(2){ height: 14px; animation-delay: 0.15s; }
+#detail .wave-bar:nth-child(3){ height: 20px; animation-delay: 0.3s; }
+#detail .wave-bar:nth-child(4){ height: 12px; animation-delay: 0.45s; }
+@keyframes wavePulse{
+      0%, 100% { opacity: 0.3; transform: scaleY(0.7); }
+      50% { opacity: 1; transform: scaleY(1.1); }
+    }
+#detail .stat-rows{
+      padding: 8px 6px 2px 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+#detail .stat-row{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 21px;
+      color: #E2E8F0;
+    }
+#detail .stat-val-cyan{
+      color: var(--cyan-bright);
+      font-size: 24px;
+    }
+#detail .queue-status-card{
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      flex: 1;
+    }
+#detail .card-subtitle{
+      font-size: 12px;
+      color: #F8FAFC;
+      text-align: center;
+      width: 100%;
+      padding-bottom: 6px;
+      border-bottom: 2px solid #233154;
+    }
+#detail .fifo-label{
+      font-size: 19px;
+      color: #CBD5E1;
+      margin-top: 4px;
+    }
+#detail .wait-hero{
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      margin: 4px 0;
+    }
+#detail .wait-big-num{
+      font-size: 24px;
+      color: var(--red);
+      text-shadow: 2px 2px 0 #2A0808;
+      transition: color 0.3s;
+    }
+#detail .wait-big-num.calm{
+      color: var(--green);
+      text-shadow: 2px 2px 0 #072410;
+    }
+#detail .wait-sub-green{
+      font-size: 17px;
+      color: var(--green);
+      margin-top: 4px;
+    }
+#detail .avg-wait-box{
+      width: 100%;
+      border-top: 2px solid #233154;
+      padding-top: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 20px;
+      color: #E2E8F0;
+    }
+#detail .avg-wait-val{
+      color: var(--cyan-bright);
+      font-size: 22px;
+    }
+#detail .agent-summary-card{
+      padding: 10px;
+    }
+#detail .summary-grid{
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 10px;
+      margin-top: 8px;
+    }
+#detail .summary-item{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-card-inner);
+      padding: 5px 8px;
+      border: 1px solid #263559;
+    }
+#detail .status-pill-icon{
+      width: 10px;
+      height: 26px;
+      flex-shrink: 0;
+    }
+#detail .summary-count{
+      font-size: 15px;
+      line-height: 1.1;
+    }
+#detail .summary-lbl{
+      font-size: 14px;
+      line-height: 1;
+      text-transform: uppercase;
+    }
+#detail .center-panel{
+      flex: 1;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 235px 1fr;
+      gap: 18px;
+      position: relative;
+      min-height: 0;
+    }
+#detail .queue-line-zone{
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      padding: 6px 4px;
+      background: rgba(9, 14, 28, 0.55);
+      border: 2px dashed #293A63;
+    }
+#detail .queue-zone-header{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 2px 8px 6px 8px;
+      border-bottom: 2px solid #233154;
+      font-size: 16px;
+      color: var(--cyan-bright);
+    }
+#detail .queue-slots{
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-around;
+      padding: 6px 6px;
+      gap: 8px;
+      position: relative;
+    }
+#detail .caller-slot{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #131D36;
+      border: 2px solid #2F4370;
+      padding: 8px 8px;
+      position: relative;
+      transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease;
+    }
+#detail .caller-slot.priority-1{
+      border-color: var(--cyan-bright);
+      box-shadow: 0 0 12px rgba(92, 225, 230, 0.22);
+    }
+#detail .caller-slot.routing-out{
+      border-color: var(--green);
+      background: #14332B;
+      transform: translateX(6px);
+    }
+#detail .caller-slot.empty-slot{
+      opacity: 0.35;
+      border-style: dashed;
+      justify-content: center;
+      height: 76px;
+      color: var(--text-muted);
+      font-size: 18px;
+    }
+#detail .slot-rank{
+      font-size: 16px;
+      color: #94A3B8;
+      width: 18px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+#detail .caller-slot.priority-1 .slot-rank{
+      color: var(--cyan-bright);
+    }
+#detail .caller-info{
+      flex: 1;
+      min-width: 0;
+    }
+#detail .caller-name-row{
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 4px;
+    }
+#detail .caller-name{
+      font-size: 19px;
+      color: #FFFFFF;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+#detail .caller-timer{
+      font-size: 17px;
+      color: #CBD5E1;
+      flex-shrink: 0;
+    }
+#detail .caller-did{
+      font-size: 14px;
+      color: #7DD3FC;
+      margin-bottom: 4px;
+    }
+#detail .wait-bar-track{
+      width: 100%;
+      height: 9px;
+      background: #090E1C;
+      border: 1px solid #2A3B63;
+      display: flex;
+      gap: 2px;
+      padding: 1px;
+    }
+#detail .wait-bar-seg{
+      flex: 1;
+      height: 100%;
+      background: #1E293B;
+      transition: background 0.2s;
+    }
+#detail .agent-grid{
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      grid-template-rows: repeat(4, 1fr);
+      gap: 10px 12px;
+      min-height: 0;
+    }
+#detail .agent-card{
+      background: #162039;
+      border: 2px solid #334673;
+      box-shadow: inset 0 0 0 2px #0A0F1E;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      transition: border-color 0.25s, transform 0.2s, box-shadow 0.25s;
+    }
+#detail .agent-card.highlight-receive{
+      border-color: var(--green);
+      box-shadow: 0 0 16px rgba(34, 197, 94, 0.55), inset 0 0 0 2px #0A0F1E;
+      transform: scale(1.015);
+    }
+#detail .agent-top{
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+#detail .agent-meta{
+      flex: 1;
+      min-width: 0;
+    }
+#detail .agent-name-line{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+#detail .agent-name{
+      font-size: 20px;
+      color: #F8FAFC;
+      line-height: 1;
+    }
+#detail .agent-call-timer{
+      font-size: 16px;
+      color: var(--blue-bright);
+      background: #0B1730;
+      padding: 1px 6px;
+      border: 1px solid #1E3A8A;
+    }
+#detail .agent-ext{
+      font-size: 16px;
+      color: #94A3B8;
+      margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+#detail .agent-status-btn{
+      width: 100%;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 10px;
+      letter-spacing: 0.5px;
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.35);
+      text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.65);
+      transition: background 0.25s, color 0.25s;
+    }
+#detail .status-AVAILABLE{
+      background: var(--green);
+      color: #04210E;
+      text-shadow: none;
+      border-color: #86EFAC;
+    }
+#detail .status-ON_CALL{
+      background: var(--blue);
+      color: #FFFFFF;
+      border-color: #93C5FD;
+    }
+#detail .status-AWAY{
+      background: var(--amber);
+      color: #1F1602;
+      text-shadow: none;
+      border-color: #FDE047;
+    }
+#detail .status-OFFLINE{
+      background: #475569;
+      color: #CBD5E1;
+      border-color: #94A3B8;
+    }
+#detail .right-panel{
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 10px;
+      min-height: 0;
+    }
+#detail .traffic-card{
+      padding: 10px 12px;
+      text-align: center;
+    }
+#detail .traffic-title{
+      font-size: 18px;
+      color: #E2E8F0;
+      margin-bottom: 8px;
+    }
+#detail .traffic-split{
+      display: grid;
+      grid-template-columns: 1fr 2px 1fr;
+      align-items: center;
+      margin: 4px 0 8px 0;
+    }
+#detail .traffic-divider{
+      height: 44px;
+      background: #2C3E6B;
+    }
+#detail .traffic-num-wait{
+      font-size: 28px;
+      color: var(--blue-bright);
+      text-shadow: 2px 2px 0 #071936;
+    }
+#detail .traffic-num-active{
+      font-size: 28px;
+      color: #FB923C;
+      text-shadow: 2px 2px 0 #2B1104;
+    }
+#detail .traffic-foot{
+      font-size: 17px;
+      color: #94A3B8;
+    }
+#detail .chart-card{
+      flex: 1;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 0;
+    }
+#detail .chart-header{
+      text-align: center;
+    }
+#detail .chart-title{
+      font-size: 12px;
+      color: #F8FAFC;
+    }
+#detail .chart-sub{
+      font-size: 15px;
+      color: var(--cyan-bright);
+    }
+#detail .bar-chart-area{
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);
+      gap: 5px;
+      align-items: end;
+      padding: 10px 2px 4px 2px;
+      border-bottom: 2px solid #2C3E6B;
+    }
+#detail .bar-col{
+      display: flex;
+      flex-direction: column-reverse;
+      gap: 2px;
+      height: 100%;
+      justify-content: flex-start;
+    }
+#detail .bar-block{
+      width: 100%;
+      height: 7px;
+      background: #1B2744;
+      transition: background 0.3s;
+    }
+#detail .bar-block.filled{
+      background: #0EA5E9;
+      box-shadow: inset 0 1px 0 #7DD3FC;
+    }
+#detail .bar-block.filled.peak{
+      background: #38BDF8;
+    }
+#detail .bar-labels{
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);
+      gap: 5px;
+      text-align: center;
+      font-size: 14px;
+      color: #94A3B8;
+      padding-top: 4px;
+    }
+#detail .sla-card{
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+#detail .sla-segments{
+      display: grid;
+      grid-template-columns: repeat(14, 1fr);
+      gap: 3px;
+      height: 18px;
+      background: #090E1C;
+      padding: 2px;
+      border: 2px solid #2C3E6B;
+    }
+#detail .sla-seg{
+      height: 100%;
+      background: #1E293B;
+      transition: background 0.3s;
+    }
+#detail .sla-banner{
+      background: linear-gradient(90deg, #991B1B 0%, #DC2626 70%, #7F1D1D 100%);
+      border: 2px solid #F87171;
+      padding: 6px 8px;
+      text-align: center;
+      font-size: 19px;
+      color: #FFFFFF;
+      text-shadow: 1px 1px 0 #000;
+      transition: background 0.4s, border-color 0.4s;
+    }
+#detail .sla-banner.healthy{
+      background: linear-gradient(90deg, #14532D 0%, #16A34A 75%, #14532D 100%);
+      border-color: #86EFAC;
+    }
+#detail .sla-metrics-list{
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 20px;
+      text-align: center;
+    }
+#detail .sla-val-red{
+      color: #F87171;
+    }
+#detail .pixel-avatar{
+      width: 42px;
+      height: 42px;
+      border: 2px solid #090E1C;
+      background: #1E293B;
+      flex-shrink: 0;
+      image-rendering: pixelated;
+    }
+#detail .caller-avatar{
+      width: 38px;
+      height: 38px;
+      border: 2px solid #090E1C;
+      background: #1E293B;
+      flex-shrink: 0;
+      image-rendering: pixelated;
+    }
+@keyframes spinSteps{
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+#detail .pixel-spinner{
+      animation: spinSteps 2.4s steps(8, end) infinite;
+    }
+
+  /* ===== queue detail screen (16-bit wall monitor) ===== */
+  #detail { position: fixed; inset: 0; z-index: 90; background: #0B1020; color: #F1F5F9; overflow: hidden;
+    font-family: 'VT323', Consolas, 'Courier New', monospace; image-rendering: pixelated; user-select: none;
+    --bg-deep:#0B1020; --bg-panel:#11182C; --bg-card:#162038; --bg-card-inner:#0E1528; --border-light:#354772; --border-dark:#070B16;
+    --border-accent:#4E6BA6; --cyan:#48D1CC; --cyan-bright:#5CE1E6; --green:#22C55E; --green-dark:#15803D; --blue:#2563EB;
+    --blue-bright:#38BDF8; --amber:#EAB308; --amber-dark:#A16207; --red:#EF4444; --red-dark:#991B1B; --grey:#64748B; --grey-dark:#334155;
+    --text-main:#F1F5F9; --text-muted:#94A3B8; }
+  #detail[hidden] { display: none; }
+  #detail *, #detail *::before, #detail *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  #detail::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 60;
+    background: linear-gradient(rgba(18,16,16,0) 50%, rgba(0,0,0,.18) 50%); background-size: 100% 4px; }
+  #detail #routing-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 40; }
+  #detail .d-right { display: flex; align-items: center; gap: 18px; }
+  #detail .d-back { font-family: 'Press Start 2P', monospace; font-size: 11px; color: #F8FAFC; background: #1B2847; cursor: pointer;
+    border: 2px solid #4E6BA6; box-shadow: inset 0 -3px 0 rgba(0,0,0,.35); padding: 10px 14px; white-space: nowrap; }
+  #detail .d-back:hover { background: #283B66; border-color: var(--cyan-bright); }
+  #detail .live-badge.down { color: var(--red); text-shadow: 0 0 8px rgba(239,68,68,.5); }
+  #detail .live-badge.down .live-dot { background: var(--red); box-shadow: 0 0 10px var(--red); }
+  #detail .status-RINGING { background: #F97316; color: #1F0B02; text-shadow: none; border-color: #FDBA74; }
+  #detail .sla-banner.idle { background: linear-gradient(90deg, #1E293B 0%, #334155 70%, #1E293B 100%); border-color: #64748B; }
+  #detail .agent-grid .no-agents { grid-column: 1 / -1; grid-row: 1 / -1; display: grid; place-items: center; color: var(--text-muted); font-size: 26px; text-align: center; }
+  #detail .agent-card { min-height: 0; }
+  .card { cursor: pointer; }
+  .card:hover { border-color: #3b5fa0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Hotline Queue Monitor <span id="subtitle">Inbound calls &rarr; queues</span></h1>
+    <div class="right">
+      <button class="disc" id="disc" title="Disconnect and return to login" hidden>Disconnect</button>
+      <div class="conn" id="conn"><span class="dot"></span><span id="connTxt">Connecting…</span></div>
+      <div class="clock"><span id="time">--:--:--</span><small id="date"></small></div>
+    </div>
+  </header>
+
+  <section class="totals" id="totals"></section>
+  <section class="grid" id="grid"><div class="empty">Loading queues…</div></section>
+
+  <footer>
+    <div class="legend">
+      <span><i style="background:var(--ok)"></i>Available</span>
+      <span><i style="background:var(--busy)"></i>On call</span>
+      <span><i style="background:var(--warn)"></i>Ringing</span>
+      <span><i style="background:var(--pause)"></i>Paused</span>
+      <span><i style="background:var(--off)"></i>Offline</span>
+      <span style="margin-left:1vw;color:#62718f">Click a queue for details</span>
+    </div>
+    <div id="updated">Waiting for first update…</div>
+  </footer>
+</div>
+
+<div id="detail" hidden>
+  <svg id="routing-overlay" xmlns="http://www.w3.org/2000/svg">
+    <defs><filter id="pixelGlow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+    <g id="static-routes"></g><g id="active-routes"></g><g id="packet-layer"></g>
+  </svg>
+
+  <div id="tv-screen">
+    <header class="header-bar">
+      <div class="header-main pixel-box">
+        <div class="brand-title font-pixel">
+          <span class="brand-cyan">DELTAPATH UC</span><span class="brand-slash">//</span><span class="brand-sub" id="d-title">QUEUE</span>
+        </div>
+        <div class="d-right">
+          <button class="d-back" id="d-back" type="button">&#9664; ALL QUEUES</button>
+          <div class="live-status-group">
+            <div class="live-badge font-pixel" id="d-live"><span class="live-dot"></span><span id="d-live-txt">LIVE</span></div>
+            <div class="updated-text" id="updated-stamp">UPDATED --:--</div>
+          </div>
+        </div>
+      </div>
+      <div class="clock-box pixel-box">
+        <div class="clock-date" id="clock-date">--</div>
+        <div class="clock-time font-pixel" id="clock-time">--:--</div>
+      </div>
+    </header>
+
+    <main class="dashboard-grid">
+      <section class="col-wrapper">
+        <h2 class="section-header font-pixel">INBOUND &amp; QUEUE</h2>
+        <div class="left-panel pixel-box">
+          <div class="pixel-card" style="padding: 8px;">
+            <div class="inbound-banner" id="inbound-node">
+              <div class="inbound-left">
+                <svg width="36" height="36" viewBox="0 0 16 16" shape-rendering="crispEdges">
+                  <rect x="2" y="2" width="12" height="3" fill="#CBD5E1"/><rect x="1" y="3" width="3" height="3" fill="#94A3B8"/><rect x="12" y="3" width="3" height="3" fill="#94A3B8"/>
+                  <rect x="3" y="5" width="10" height="9" fill="#475569"/><rect x="4" y="6" width="5" height="3" fill="#38BDF8"/>
+                  <rect x="10" y="6" width="2" height="1" fill="#E2E8F0"/><rect x="10" y="8" width="2" height="1" fill="#E2E8F0"/><rect x="10" y="10" width="2" height="1" fill="#E2E8F0"/>
+                  <rect x="4" y="10" width="5" height="3" fill="#1E293B"/>
+                </svg>
+                <div><div class="inbound-title font-pixel">INBOUND</div><div class="inbound-sub">PSTN/VoIP Trunk</div></div>
+              </div>
+              <div class="signal-waves"><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span></div>
+            </div>
+            <div class="stat-rows">
+              <div class="stat-row"><span>TOTAL CALLS:</span><span class="stat-val-cyan font-pixel" style="font-size:15px;" id="stat-total-calls">0</span></div>
+              <div class="stat-row"><span>ANSWERED:</span><span class="stat-val-cyan font-pixel" style="font-size:15px;" id="stat-answered-calls">0</span></div>
+            </div>
+          </div>
+
+          <div class="queue-status-card pixel-card">
+            <div class="card-subtitle font-pixel">QUEUE STATUS</div>
+            <div class="fifo-label">FIFO QUEUE</div>
+            <div class="wait-hero">
+              <svg class="pixel-spinner" width="42" height="42" viewBox="0 0 16 16" shape-rendering="crispEdges">
+                <rect x="7" y="1" width="2" height="2" fill="#E2E8F0"/><rect x="11" y="3" width="2" height="2" fill="#CBD5E1"/><rect x="13" y="7" width="2" height="2" fill="#94A3B8"/>
+                <rect x="11" y="11" width="2" height="2" fill="#64748B"/><rect x="7" y="13" width="2" height="2" fill="#475569"/><rect x="3" y="11" width="2" height="2" fill="#334155"/>
+                <rect x="1" y="7" width="2" height="2" fill="#1E293B"/><rect x="3" y="3" width="2" height="2" fill="#64748B"/>
+              </svg>
+              <div><div class="wait-big-num font-pixel" id="queue-wait-headline">0 WAIT</div><div class="wait-sub-green" id="queue-wait-sub">0 CALLERS WAITING</div></div>
+            </div>
+            <div class="avg-wait-box"><span>AVG WAIT:</span><span class="avg-wait-val font-pixel" style="font-size:14px;" id="stat-avg-wait">0:00</span></div>
+          </div>
+
+          <div class="agent-summary-card pixel-card">
+            <div class="card-subtitle font-pixel" style="text-align:left;">Agent Status</div>
+            <div class="summary-grid">
+              <div class="summary-item"><div class="status-pill-icon" style="background: var(--green);"></div><div><div class="summary-count font-pixel" style="color: var(--green);" id="sum-available">0</div><div class="summary-lbl" style="color: var(--green);">AVAILABLE</div></div></div>
+              <div class="summary-item"><div class="status-pill-icon" style="background: var(--blue-bright);"></div><div><div class="summary-count font-pixel" style="color: var(--blue-bright);" id="sum-oncall">0</div><div class="summary-lbl" style="color: var(--blue-bright);">ON CALL</div></div></div>
+              <div class="summary-item"><div class="status-pill-icon" style="background: var(--amber);"></div><div><div class="summary-count font-pixel" style="color: var(--amber);" id="sum-away">0</div><div class="summary-lbl" style="color: var(--amber);">ON BREAK</div></div></div>
+              <div class="summary-item"><div class="status-pill-icon" style="background: var(--red);"></div><div><div class="summary-count font-pixel" style="color: var(--red);" id="sum-offline">0</div><div class="summary-lbl" style="color: var(--red);">OFFLINE</div></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="col-wrapper">
+        <h2 class="section-header font-pixel">AGENT ROSTER &amp; LIVE ASSIGNMENT</h2>
+        <div class="center-panel pixel-box" id="center-stage">
+          <div class="queue-line-zone" id="queue-line-zone">
+            <div class="queue-zone-header"><span>CALLER QUEUE LINE</span><span id="queue-capacity-label">FIFO</span></div>
+            <div class="queue-slots" id="queue-slots-container"></div>
+          </div>
+          <div class="agent-grid" id="agent-grid-container"></div>
+        </div>
+      </section>
+
+      <section class="col-wrapper">
+        <h2 class="section-header font-pixel">QUEUE &amp; SERVICE METRICS</h2>
+        <div class="right-panel pixel-box">
+          <div class="traffic-card pixel-card">
+            <div class="traffic-title">Calls Waiting &amp; Active Calls</div>
+            <div class="traffic-split"><div class="traffic-num-wait font-pixel" id="metric-waiting">0</div><div class="traffic-divider"></div><div class="traffic-num-active font-pixel" id="metric-active">0</div></div>
+            <div class="traffic-foot" id="traffic-status-text">Queue clear &bull; Ready</div>
+          </div>
+          <div class="chart-card pixel-card">
+            <div class="chart-header"><div class="chart-title font-pixel">QUEUE DEPTH</div><div class="chart-sub">LAST 10 MINUTES</div></div>
+            <div class="bar-chart-area" id="queue-depth-bars"></div>
+            <div class="bar-labels"><span>9m</span><span>8m</span><span>7m</span><span>6m</span><span>5m</span><span>4m</span><span>3m</span><span>2m</span><span>1m</span><span style="color:#5CE1E6;">Now</span></div>
+          </div>
+          <div class="sla-card pixel-card">
+            <div class="sla-segments" id="sla-segments"></div>
+            <div class="sla-banner" id="sla-banner">Service Level <span id="sla-pct">--</span></div>
+            <div class="sla-metrics-list">
+              <div>Abandoned: <span class="sla-val-red font-pixel" style="font-size:14px;" id="metric-abandoned">0</span></div>
+              <div>Abandon Rate: <span class="sla-val-red font-pixel" style="font-size:14px;" id="metric-abandon-rate">0%</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div class="login" id="login">
+  <form class="lcard" id="lform" autocomplete="on">
+    <div class="lhead">
+      <div class="logo">D</div>
+      <div><h2>Deltapath Live Queue Monitor</h2><p>Enter your server credentials to start monitoring</p></div>
+    </div>
+
+    <label class="f" for="srv">Server address</label>
+    <div class="inp">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>
+      <input id="srv" type="text" placeholder="https://uc-server.local" autocomplete="url" spellcheck="false">
+    </div>
+
+    <label class="f" for="usr">ACL username</label>
+    <div class="inp">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
+      <input id="usr" type="text" placeholder="administrator" autocomplete="username" spellcheck="false">
+    </div>
+
+    <label class="f" for="pwd">Password</label>
+    <div class="inp">
+      <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+      <input id="pwd" type="password" placeholder="••••••••" autocomplete="current-password">
+      <button type="button" class="show" id="showpwd">Show</button>
+    </div>
+
+    <label class="chk"><input type="checkbox" id="tls" checked> Allow private / self-signed TLS certificate</label>
+    <label class="chk"><input type="checkbox" id="rem"> Keep me connected on this device (saves password in this browser)</label>
+
+    <button class="lbtn" id="lbtn" type="submit">Connect &amp; monitor</button>
+    <div class="lerr" id="lerr"></div>
+    <div class="lnote">Leave the server blank if this page is hosted on the Deltapath server itself.</div>
+  </form>
+</div>
+
+<script>
+/* ============================ CONFIG ============================ */
+const CONFIG = {
+  // Deltapath server address, e.g. "https://pbx.yourcompany.local".
+  // Leave "" if this file is served from the same host as Deltapath (recommended, avoids CORS).
+  // Server, username and password are entered on the login screen (not stored in this file).
+  baseUrl: "",
+  username: "",
+  password: "",
+
+  pollMs: 3000,            // how often to refresh from the PBX
+  queueIds: [],            // e.g. ["1","3"] to show only your hotline queues; [] = show all queues
+
+  // Alert thresholds (cards turn amber, then red + flashing)
+  warnWaiting: 2,          // callers waiting in a queue -> amber
+  critWaiting: 4,          // callers waiting in a queue -> red
+  warnWaitSec: 30,         // longest wait in seconds   -> amber
+  critWaitSec: 60,         // longest wait in seconds   -> red
+
+  demo: false              // true = skip login and show fake data (or open the page with ?demo=1)
+};
+/* ================================================================ */
+
+const API = "/RESTful/index.php/v1";
+const params = new URLSearchParams(location.search);
+if (params.get("demo") === "1") CONFIG.demo = true;
+
+const state = { names: {}, data: null, fetchedAt: 0, ok: false, loggedIn: false };
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const num = v => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+const mmss = s => { s = Math.max(0, Math.round(s)); return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); };
+
+/* ---------- Deltapath API ---------- */
+async function login() {
+  if (!CONFIG.username) { state.loggedIn = true; return; }
+  const r = await fetch(CONFIG.baseUrl + API + "/post/auth/login", {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId: CONFIG.username, password: CONFIG.password, response: "1" })
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.success === false) throw new Error(j.errors || "Login failed (" + r.status + ")");
+  state.loggedIn = true;
+}
+
+async function api(path, retry = true) {
+  const r = await fetch(CONFIG.baseUrl + API + path, { credentials: "include" });
+  if ((r.status === 401 || r.status === 403) && retry && CONFIG.username) {
+    state.loggedIn = false; await login(); return api(path, false);
+  }
+  if (!r.ok) throw new Error("HTTP " + r.status + " on " + path);
+  return r.json();
+}
+
+async function loadNames() {
+  // Queue List (13.32): used only to show friendly queue names
+  try {
+    const j = await api("/get/callcentre/queue/view/list?start=0&limit=500");
+    (j.list || []).forEach(q => { state.names[String(q.id)] = q.noc_queuename || q.name || q.queuename || ("Queue " + q.id); });
+  } catch (e) { console.warn("Queue names unavailable:", e.message); }
+}
+
+async function poll() {
+  if (!CONFIG.demo && !CONFIG.username) return;
+  try {
+    if (!state.loggedIn) await login();
+    if (!Object.keys(state.names).length) await loadNames();
+    // Queue Status Get (All) (13.42): { "<queueId>": { Calls, Holdtime, Member[], Caller[], ... } }
+    const j = CONFIG.demo ? demoData() : await api("/get/callcentre/queue/status");
+    ingest(j); state.ok = true;
+  } catch (e) {
+    state.ok = false; state.err = e.message; console.error(e);
+  }
+  setConn();
+  render();
+}
+
+/* ---------- agent status mapping ----------
+   "Status" on each member is the Asterisk device state code (not defined in the Deltapath guide):
+   1 not in use, 2 in use, 3 busy, 4 invalid, 5 unavailable, 6 ringing, 7 in use + ringing, 8 on hold, 0 unknown. */
+function agentState(m) {
+  if (String(m.Paused) === "1") return "p";
+  const s = String(m.Status);
+  if (s === "1") return "a";
+  if (s === "6") return "r";
+  if (["2", "3", "7", "8"].includes(s)) return "b";
+  return "o";
+}
+const ext = m => { const loc = String(m.Location || ""); const p = loc.split("/"); return (p[1] || m.Name || loc).split("@")[0]; };
+
+/* ---------- render ---------- */
+function setConn() {
+  const c = $("conn");
+  c.className = "conn " + (state.ok ? "live" : "err");
+  $("connTxt").textContent = state.ok ? (CONFIG.demo ? "Demo data" : "Live") : "Connection problem – retrying";
+}
+
+function render() {
+  const g = $("grid");
+  if (!state.data) { return; }
+  if (dview.id !== null) { renderDetail(); return; }      // queue detail screen is open
+  const elapsed = (Date.now() - state.fetchedAt) / 1000;
+  let ids = Object.keys(state.data).sort((a, b) => num(a) - num(b));
+  if (CONFIG.queueIds.length) ids = ids.filter(id => CONFIG.queueIds.map(String).includes(id));
+
+  const T = { waiting: 0, longest: 0, avail: 0, busy: 0, completed: 0, abandoned: 0 };
+  const cards = ids.map(id => {
+    const q = state.data[id] || {};
+    const callers = (q.Caller || []).map(c => ({ ...c, w: num(c.Wait) + (state.ok ? elapsed : 0) }));
+    const members = q.Member || [];
+    const cnt = { a: 0, b: 0, r: 0, p: 0, o: 0 };
+    const ms = members.map(m => { const s = agentState(m); cnt[s]++; return { m, s }; });
+    const longest = callers.reduce((mx, c) => Math.max(mx, c.w), 0);
+    const waiting = callers.length;
+    const level = (waiting >= CONFIG.critWaiting || longest >= CONFIG.critWaitSec) ? "crit"
+                : (waiting >= CONFIG.warnWaiting || longest >= CONFIG.warnWaitSec) ? "warn" : "";
+
+    T.waiting += waiting; T.longest = Math.max(T.longest, longest);
+    T.avail += cnt.a; T.busy += cnt.b + cnt.r;
+    T.completed += num(q.Completed); T.abandoned += num(q.Abandoned);
+
+    const callerHtml = waiting
+      ? callers.slice(0, 4).map(c => {
+          const cl = c.w >= CONFIG.critWaitSec ? "crit" : c.w >= CONFIG.warnWaitSec ? "warn" : "";
+          return `<div class="caller ${cl}"><span class="pos">${esc(c.Position)}</span>
+            <span class="who">${esc(c.CallerIDName && c.CallerIDName !== c.CallerIDNum ? c.CallerIDName + " · " : "")}${esc(c.CallerIDNum || "Unknown")}</span>
+            <span class="wt">${mmss(c.w)}</span></div>`;
+        }).join("") + (waiting > 4 ? `<div class="none">+${waiting - 4} more waiting</div>` : "")
+      : `<div class="none">No callers waiting</div>`;
+
+    const order = { r: 0, b: 1, a: 2, p: 3, o: 4 };
+    const label = { a: "Available", b: "On call", r: "Ringing", p: "Paused", o: "Offline" };
+    const chips = ms.sort((x, y) => order[x.s] - order[y.s])
+      .map(({ m, s }) => `<span class="chip ${s}" title="${label[s]}"><i></i>${esc(ext(m))}</span>`).join("");
+
+    return `<div class="card ${level}" data-qid="${esc(id)}" title="Click for queue detail">
+      <div class="ch"><div class="name">${esc(state.names[id] || "Queue " + id)}</div><div class="qid">ID ${esc(id)}</div></div>
+      <div class="big">
+        <div><div class="l">Waiting</div><div class="v">${waiting}</div></div>
+        <div><div class="l">Longest wait</div><div class="v w">${waiting ? mmss(longest) : "--:--"}</div></div>
+      </div>
+      <div class="agents">
+        <div class="ag a"><b>${cnt.a}</b><span>Available</span></div>
+        <div class="ag b"><b>${cnt.b + cnt.r}</b><span>On call</span></div>
+        <div class="ag p"><b>${cnt.p}</b><span>Paused</span></div>
+        <div class="ag o"><b>${cnt.o}</b><span>Offline</span></div>
+      </div>
+      <div class="stats">
+        <span>Answered <b>${num(q.Completed)}</b></span>
+        <span>Abandoned <b>${num(q.Abandoned)}</b></span>
+        <span>Avg wait <b>${mmss(num(q.Holdtime))}</b></span>
+        <span>Avg talk <b>${mmss(num(q.TalkTime))}</b></span>
+        <span>Service level <b>${num(q.ServicelevelPerf).toFixed(0)}%</b></span>
+      </div>
+      <div class="sec">Calls in queue</div>
+      <div class="callers">${callerHtml}</div>
+      <div class="sec">Agents</div>
+      <div class="members">${chips || '<span class="none">No agents logged in</span>'}</div>
+    </div>`;
+  });
+
+  // layout: pick columns so everything fits on one screen with no scrolling
+  const n = Math.max(cards.length, 1);
+  const cols = n <= 1 ? 1 : n <= 2 ? 2 : n <= 3 ? 3 : n <= 4 ? 2 : n <= 6 ? 3 : 4;
+  const rows = Math.ceil(n / cols);
+  g.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  g.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+  g.innerHTML = cards.length ? cards.join("") : `<div class="empty" style="grid-column:1/-1">No queues found.<br>Check the queue IDs in CONFIG or the account permissions.</div>`;
+
+  const tot = (l, v, cls = "") => `<div class="tot ${cls}"><div class="l">${l}</div><div class="v">${v}</div></div>`;
+  $("totals").innerHTML =
+    tot("Calls waiting", T.waiting, T.waiting >= CONFIG.critWaiting ? "crit" : T.waiting >= CONFIG.warnWaiting ? "warn" : "") +
+    tot("Longest wait", T.waiting ? mmss(T.longest) : "--:--", T.longest >= CONFIG.critWaitSec ? "crit" : T.longest >= CONFIG.warnWaitSec ? "warn" : "") +
+    tot("Agents available", T.avail, "ok") +
+    tot("Agents on call", T.busy) +
+    tot("Answered today", T.completed) +
+    tot("Abandoned", T.abandoned, T.abandoned ? "warn" : "");
+
+  $("updated").textContent = state.ok
+    ? "Last update " + new Date(state.fetchedAt).toLocaleTimeString()
+    : "Last good update " + (state.fetchedAt ? new Date(state.fetchedAt).toLocaleTimeString() : "never") + (state.err ? " · " + state.err : "");
+}
+
+function tickClock() {
+  const d = new Date();
+  $("time").textContent = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  $("date").textContent = d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+}
+
+/* ---------- demo data (preview only) ---------- */
+function demoData() {
+  const mk = (n, base) => Array.from({ length: n }, (_, i) => ({
+    Name: "00" + (780000 + base + i), Location: "SIP/" + (1000 + base + i),
+    Status: String([1, 1, 2, 2, 6, 5, 1][(i + base) % 7]), Paused: i === 3 ? "1" : "0", CallsTaken: "0", LastCall: "0"
+  }));
+  const callers = n => Array.from({ length: n }, (_, i) => ({
+    Position: String(i + 1), CallerIDNum: "0917" + Math.floor(1000000 + Math.random() * 8999999),
+    CallerIDName: i % 2 ? "" : "Customer", Wait: String(10 + i * 25 + Math.floor(Math.random() * 10))
+  }));
+  state.names = { 1: "Hotline Main", 2: "Support", 3: "Sales" };
+  return {
+    1: { Calls: "3", Holdtime: "42", TalkTime: "185", Completed: "57", Abandoned: "4", ServicelevelPerf: "88.0", Member: mk(6, 0), Caller: callers(3) },
+    2: { Calls: "0", Holdtime: "18", TalkTime: "240", Completed: "31", Abandoned: "1", ServicelevelPerf: "96.0", Member: mk(4, 20), Caller: [] },
+    3: { Calls: "5", Holdtime: "75", TalkTime: "130", Completed: "22", Abandoned: "6", ServicelevelPerf: "61.0", Member: mk(3, 40), Caller: callers(5) }
+  };
+}
+
+
+/* ================= QUEUE DETAIL SCREEN (16-bit wall monitor) ================= */
+const AVATAR_PRESETS = [
+  { skin:'#F5CBA7', hair:'#F1C40F', shirt:'#1E8449', tie:'#E74C3C', hairStyle:'short' },
+  { skin:'#F5CBA7', hair:'#5D4037', shirt:'#27AE60', tie:null,      hairStyle:'bob' },
+  { skin:'#6E473B', hair:'#1C1C1C', shirt:'#2E86C1', tie:'#F1C40F', hairStyle:'short' },
+  { skin:'#FAD7A0', hair:'#BDC3C7', shirt:'#34495E', tie:'#3498DB', hairStyle:'short' },
+  { skin:'#5C3829', hair:'#111111', shirt:'#D35400', tie:null,      hairStyle:'short' },
+  { skin:'#F5CBA7', hair:'#A04000', shirt:'#C0392B', tie:null,      hairStyle:'bob' },
+  { skin:'#FAD7A0', hair:'#F4D03F', shirt:'#2980B9', tie:'#ECF0F1', hairStyle:'short' },
+  { skin:'#F5CBA7', hair:'#F7DC6F', shirt:'#8E44AD', tie:null,      hairStyle:'bob' },
+  { skin:'#FAD7A0', hair:'#F1C40F', shirt:'#C0392B', tie:null,      hairStyle:'spiky' },
+  { skin:'#5C3829', hair:'#17202A', shirt:'#2C3E50', tie:'#E74C3C', hairStyle:'short' },
+  { skin:'#EDBB99', hair:'#4A235A', shirt:'#566573', tie:null,      hairStyle:'bob' }
+];
+function drawPixelAvatar(canvas, idx, gray) {
+  if (!canvas) return;
+  const c = canvas.getContext("2d"); canvas.width = 12; canvas.height = 12;
+  const p = AVATAR_PRESETS[idx % AVATAR_PRESETS.length];
+  const skin = gray ? "#94A3B8" : p.skin, hair = gray ? "#475569" : p.hair, shirt = gray ? "#64748B" : p.shirt;
+  c.fillStyle = "#1E293B"; c.fillRect(0, 0, 12, 12);
+  c.fillStyle = shirt; c.fillRect(2, 9, 8, 3); c.fillRect(3, 8, 6, 1);
+  if (p.tie && !gray) { c.fillStyle = p.tie; c.fillRect(5, 9, 2, 3); } else { c.fillStyle = skin; c.fillRect(5, 8, 2, 2); }
+  c.fillStyle = skin; c.fillRect(4, 3, 4, 5); c.fillRect(3, 4, 6, 3);
+  c.fillStyle = hair;
+  if (p.hairStyle === "bob") { c.fillRect(3, 2, 6, 2); c.fillRect(3, 3, 1, 5); c.fillRect(8, 3, 1, 5); }
+  else if (p.hairStyle === "spiky") { c.fillRect(3, 1, 6, 2); c.fillRect(4, 0, 2, 1); c.fillRect(7, 0, 2, 1); }
+  else { c.fillRect(3, 2, 6, 2); c.fillRect(3, 3, 1, 2); c.fillRect(8, 3, 1, 2); }
+  c.fillStyle = "#0F172A"; c.fillRect(4, 5, 1, 1); c.fillRect(7, 5, 1, 1);
+}
+const hashStr = s => { let h = 0; for (const ch of String(s)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return h; };
+const fmtDur = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + "m " + (s % 60 < 10 ? "0" : "") + (s % 60) + "s"; };
+const fmtShort = s => { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ":" + (s % 60 < 10 ? "0" : "") + (s % 60); };
+const ST = { a: "AVAILABLE", b: "ON_CALL", r: "RINGING", p: "AWAY", o: "OFFLINE" };
+
+const dview = { id: null, hist: {}, since: {}, snap: {}, assigned: {}, packets: [], routes: [], cur: { callers: [], members: [] }, raf: false };
+
+function agentInfo(m) {
+  const s = agentState(m);
+  const nm = String(m.Name || "");
+  const e = ext(m);
+  return { key: nm + "|" + (m.Location || ""), s, st: ST[s], loc: m.Location || "",
+           title: /[A-Za-z]/.test(nm) ? nm : String(e).split("-")[0] };
+}
+
+/* every poll: store data, keep per-queue history, notice new/answered callers for the animations */
+function ingest(j) {
+  const now = Date.now();
+  state.data = j; state.fetchedAt = now;
+  Object.keys(j).forEach(qid => {
+    const q = j[qid] || {};
+    const members = (q.Member || []).map(agentInfo);
+    const callers = q.Caller || [];
+    members.forEach(m => { const k = qid + "|" + m.key; const o = dview.since[k]; if (!o || o.s !== m.s) dview.since[k] = { s: m.s, t: now }; });
+
+    const cur = callers.length + members.filter(m => m.s === "b" || m.s === "r").length;
+    const h = dview.hist[qid] || (dview.hist[qid] = { vals: Array(10).fill(0), t: now, first: true });
+    if (h.first) { h.vals[9] = cur; h.first = false; }
+    else if (now - h.t >= 60000) { h.vals.push(cur); h.vals.shift(); h.t = now; }
+    else h.vals[9] = Math.max(h.vals[9], cur);
+
+    const ids = callers.map(c => c.Uniqueid || (c.CallerIDNum + "|" + c.Position));
+    const snap = dview.snap[qid];
+    if (dview.id === qid && snap) detectEvents(ids, members, snap);
+    dview.snap[qid] = { ids, ag: new Map(members.map(m => [m.key, m.s])) };
+  });
+}
+
+function detectEvents(ids, members, snap) {
+  const inb = $("inbound-node");
+  ids.forEach((id, i) => { if (!snap.ids.includes(id)) spawnPacket(inb, $("caller-slot-" + Math.min(3, i)), "#5CE1E6", 0.55); });
+  const gone = snap.ids.some(id => !ids.includes(id));
+  const busy = members.find(m => snap.ag.get(m.key) === "a" && (m.s === "b" || m.s === "r"));
+  if (gone && busy) {
+    spawnPacket($("caller-slot-0"), $("agent-card-" + members.indexOf(busy)), "#22C55E", 0.45);
+    dview.assigned[busy.key] = Date.now() + 1400;
+  }
+}
+
+function renderDetail() {
+  const id = dview.id, q = state.data && state.data[id];
+  if (!q) { closeDetail(); return; }
+  const now = Date.now();
+  const elapsed = state.ok ? (now - state.fetchedAt) / 1000 : 0;
+  const callers = (q.Caller || []).map(c => ({ ...c, w: num(c.Wait) + elapsed }));
+  const members = (q.Member || []).map(agentInfo).slice(0, 24);
+  const cnt = { a: 0, b: 0, r: 0, p: 0, o: 0 };
+  members.forEach(m => cnt[m.s]++);
+  const waiting = callers.length, active = cnt.b + cnt.r;
+  const done = num(q.Completed), lost = num(q.Abandoned), total = done + lost;
+  dview.cur = { callers, members };
+
+  // header
+  $("d-title").textContent = (state.names[id] || "Queue " + id).toUpperCase();
+  const d = new Date();
+  const days = ["SUNDAY","MONDAY","TUESDAY","WEDNESDAY","THURSDAY","FRIDAY","SATURDAY"];
+  const mons = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  const tstr = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+  $("clock-date").textContent = days[d.getDay()] + ", " + mons[d.getMonth()] + " " + d.getDate();
+  $("clock-time").textContent = tstr;
+  $("updated-stamp").textContent = "UPDATED " + (state.fetchedAt ? new Date(state.fetchedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) : "--:--");
+  $("d-live").classList.toggle("down", !state.ok);
+  $("d-live-txt").textContent = state.ok ? (CONFIG.demo ? "DEMO" : "LIVE") : "NO LINK";
+
+  // left column
+  $("stat-total-calls").textContent = total;
+  $("stat-answered-calls").textContent = done;
+  const wh = $("queue-wait-headline");
+  wh.textContent = waiting + " WAIT"; wh.className = "wait-big-num font-pixel" + (waiting === 0 ? " calm" : "");
+  $("queue-wait-sub").textContent = waiting === 1 ? "1 CALLER WAITING" : waiting + " CALLERS WAITING";
+  $("stat-avg-wait").textContent = fmtShort(num(q.Holdtime));
+  $("sum-available").textContent = cnt.a; $("sum-oncall").textContent = active;
+  $("sum-away").textContent = cnt.p; $("sum-offline").textContent = cnt.o;
+
+  // caller queue line (4 visible slots)
+  const slots = $("queue-slots-container"); let html = "";
+  for (let i = 0; i < 4; i++) {
+    const c = callers[i];
+    if (c) {
+      const filled = Math.min(8, Math.max(1, Math.ceil(c.w / 22)));
+      const col = c.w >= CONFIG.critWaitSec ? "#EF4444" : c.w >= CONFIG.warnWaitSec ? "#EAB308" : "#22C55E";
+      let segs = ""; for (let k = 0; k < 8; k++) segs += `<div class="wait-bar-seg" style="background:${k < filled ? col : "#1E293B"}"></div>`;
+      const label = c.CallerIDName && c.CallerIDName !== c.CallerIDNum ? c.CallerIDName : "Caller " + (c.Position || i + 1);
+      html += `<div class="caller-slot ${i === 0 ? "priority-1" : ""}" id="caller-slot-${i}">
+        <div class="slot-rank font-pixel">${i + 1}</div><canvas class="caller-avatar"></canvas>
+        <div class="caller-info"><div class="caller-name-row"><span class="caller-name">${esc(label)}</span><span class="caller-timer">${fmtDur(c.w)}</span></div>
+        <div class="caller-did">${esc(c.CallerIDNum || "Unknown")}</div><div class="wait-bar-track">${segs}</div></div></div>`;
+    } else {
+      html += `<div class="caller-slot empty-slot" id="caller-slot-${i}">${i === 0 && !waiting ? "NO CALLERS WAITING" : "SLOT " + (i + 1) + " OPEN"}</div>`;
+    }
+  }
+  slots.innerHTML = html;
+  slots.querySelectorAll("canvas").forEach((cv, i) => drawPixelAvatar(cv, 8 + hashStr(callers[i].Uniqueid || callers[i].CallerIDNum) % 3, false));
+  $("queue-capacity-label").textContent = waiting > 4 ? "+" + (waiting - 4) + " MORE" : "FIFO";
+
+  // agent roster
+  const grid = $("agent-grid-container");
+  const n = members.length, cols = n <= 8 ? 2 : n <= 12 ? 3 : 4, rows = Math.max(1, Math.ceil(n / cols));
+  grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+  grid.innerHTML = n ? members.map((m, i) => {
+    const hl = dview.assigned[m.key] > now;
+    const since = dview.since[id + "|" + m.key];
+    const badge = m.st === "ON_CALL" && since ? `<span class="agent-call-timer">${fmtShort((now - since.t) / 1000)}</span>` : "";
+    return `<div class="agent-card ${hl ? "highlight-receive" : ""}" id="agent-card-${i}">
+      <div class="agent-top"><canvas class="pixel-avatar"></canvas><div class="agent-meta">
+        <div class="agent-name-line"><span class="agent-name">${esc(m.title)}</span>${badge}</div>
+        <div class="agent-ext">${esc("Ext " + m.loc)}</div></div></div>
+      <div class="agent-status-btn status-${m.st}">${m.st.replace("_", " ")}</div></div>`;
+  }).join("") : `<div class="no-agents">NO AGENTS LOGGED IN</div>`;
+  grid.querySelectorAll("canvas").forEach((cv, i) => drawPixelAvatar(cv, hashStr(members[i].key), members[i].s === "o"));
+
+  // right column
+  $("metric-waiting").textContent = waiting; $("metric-active").textContent = active;
+  $("traffic-status-text").textContent = waiting > 0 ? "Live traffic active" : "Queue clear \u2022 Ready";
+  const vals = (dview.hist[id] || { vals: Array(10).fill(0) }).vals;
+  const scale = Math.max(10, ...vals);
+  $("queue-depth-bars").innerHTML = vals.map((v, idx) => {
+    const f = v > 0 ? Math.max(1, Math.round(v / scale * 10)) : 0; let b = "";
+    for (let k = 0; k < 10; k++) b += `<div class="bar-block ${k < f ? "filled" : ""} ${idx === 9 && k < f ? "peak" : ""}"></div>`;
+    return `<div class="bar-col">${b}</div>`;
+  }).join("");
+
+  const sl = Math.round(num(q.ServicelevelPerf)), idle = total === 0;
+  const filledSla = Math.round(sl / 100 * 14); let segs = "";
+  for (let k = 0; k < 14; k++) segs += `<div class="sla-seg" style="${!idle && k < filledSla ? "background:" + (k < 8 ? "#EF4444" : k < 11 ? "#EAB308" : "#22C55E") : ""}"></div>`;
+  $("sla-segments").innerHTML = segs;
+  $("sla-pct").textContent = idle ? "--" : sl + "%";
+  $("sla-banner").className = "sla-banner" + (idle ? " idle" : sl >= 80 ? " healthy" : "");
+  $("metric-abandoned").textContent = lost;
+  $("metric-abandon-rate").textContent = (total ? Math.round(lost / total * 100) : 0) + "%";
+
+  drawRoutes();
+}
+
+/* ---- dotted routing lines + glowing packets (inbound -> queue line -> agents) ---- */
+function elPt(el, ax = 0.5, ay = 0.5) { if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width * ax), y: Math.round(r.top + r.height * ay) }; }
+function orthoPath(a, b, m = 0.5) { const mx = Math.round(a.x + (b.x - a.x) * m); return `M ${a.x} ${a.y} L ${mx} ${a.y} L ${mx} ${b.y} L ${b.x} ${b.y}`; }
+function orthoPts(a, b, m = 0.5) { const mx = Math.round(a.x + (b.x - a.x) * m); return [a, { x: mx, y: a.y }, { x: mx, y: b.y }, b]; }
+
+function drawRoutes() {
+  const sg = $("static-routes"), ag = $("active-routes");
+  if (!sg || !ag || dview.id === null) return;
+  let h = "";
+  const pIn = elPt($("inbound-node"), 1, 0.55), pQ = elPt($("queue-line-zone"), 0, 0.18);
+  if (pIn && pQ) h += `<path d="${orthoPath(pIn, pQ, 0.55)}" fill="none" stroke="#155E75" stroke-width="4" stroke-dasharray="6 4"/>
+    <polygon points="${pQ.x},${pQ.y} ${pQ.x - 8},${pQ.y - 5} ${pQ.x - 8},${pQ.y + 5}" fill="#2DD4BF"/>`;
+  for (let i = 0; i < 3; i++) {
+    const a = elPt($("caller-slot-" + i), 0.12, 1), b = elPt($("caller-slot-" + (i + 1)), 0.12, 0);
+    if (a && b) h += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#2DD4BF" stroke-width="2" stroke-dasharray="3 3" opacity="0.65"/>`;
+  }
+  const { callers, members } = dview.cur, from = elPt($("caller-slot-0"), 1, 0.5);
+  if (from && callers.length) members.forEach((m, i) => {
+    if (m.s !== "a") return;
+    const to = elPt($("agent-card-" + i), 0, 0.5);
+    if (to) h += `<path d="${orthoPath(from, to, 0.45)}" fill="none" stroke="#22C55E" stroke-width="2.5" stroke-dasharray="5 5" opacity="0.55"/>
+      <polygon points="${to.x},${to.y} ${to.x - 7},${to.y - 4} ${to.x - 7},${to.y + 4}" fill="#22C55E" opacity="0.85"/>`;
+  });
+  sg.innerHTML = h;
+  ag.innerHTML = dview.routes.map(r => `<path d="${orthoPath(r.from, r.to, r.mid)}" fill="none" stroke="${r.color}" stroke-width="4" filter="url(#pixelGlow)"/>
+    <polygon points="${r.to.x},${r.to.y} ${r.to.x - 9},${r.to.y - 6} ${r.to.x - 9},${r.to.y + 6}" fill="${r.color}"/>`).join("");
+}
+
+function spawnPacket(fromEl, toEl, color = "#5CE1E6", mid = 0.5) {
+  if (!fromEl || !toEl || dview.id === null) return;
+  const p1 = elPt(fromEl, 1, 0.5), p2 = elPt(toEl, 0, 0.5);
+  dview.packets.push({ pts: orthoPts(p1, p2, mid), t: 0, color });
+  dview.routes.push({ from: p1, to: p2, color, mid, ttl: 45 });
+}
+
+function animatePackets() {
+  if (dview.id === null) { dview.raf = false; return; }
+  const layer = $("packet-layer"); let out = "";
+  for (let i = dview.packets.length - 1; i >= 0; i--) {
+    const p = dview.packets[i]; p.t += 0.032;
+    if (p.t >= 1) { dview.packets.splice(i, 1); continue; }
+    const segs = p.pts.length - 1, sc = p.t * segs, si = Math.min(segs - 1, Math.floor(sc)), st = sc - si;
+    const a = p.pts[si], b = p.pts[si + 1];
+    const x = Math.round(a.x + (b.x - a.x) * st), y = Math.round(a.y + (b.y - a.y) * st);
+    out += `<rect x="${x - 6}" y="${y - 6}" width="12" height="12" fill="${p.color}" filter="url(#pixelGlow)"/><rect x="${x - 3}" y="${y - 3}" width="6" height="6" fill="#FFFFFF"/>`;
+  }
+  layer.innerHTML = out;
+  let redraw = false;
+  for (let i = dview.routes.length - 1; i >= 0; i--) { if (--dview.routes[i].ttl <= 0) { dview.routes.splice(i, 1); redraw = true; } }
+  if (redraw) drawRoutes();
+  requestAnimationFrame(animatePackets);
+}
+
+function openDetail(id) {
+  if (!state.data || !state.data[id]) return;
+  dview.id = String(id); dview.packets = []; dview.routes = [];
+  $("detail").hidden = false;
+  renderDetail();
+  if (!dview.raf) { dview.raf = true; requestAnimationFrame(animatePackets); }
+  try { history.replaceState(null, "", "#queue" + id); } catch (e) {}
+}
+function closeDetail() {
+  dview.id = null; dview.packets = []; dview.routes = [];
+  $("detail").hidden = true;
+  try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+  render();
+}
+function openFromHash() {
+  const m = /^#queue(\d+)$/.exec(location.hash || "");
+  if (m && state.data && state.data[m[1]]) openDetail(m[1]);
+}
+
+$("grid").addEventListener("click", ev => {
+  const el = document.elementFromPoint(ev.clientX, ev.clientY);   // the grid is rebuilt every second, so look up by position
+  const card = el && el.closest("[data-qid]");
+  if (card) openDetail(card.dataset.qid);
+});
+$("d-back").addEventListener("click", closeDetail);
+document.addEventListener("keydown", ev => { if (ev.key === "Escape" && dview.id !== null) closeDetail(); });
+window.addEventListener("resize", drawRoutes);
+setInterval(() => {                                                // ambient call-flow pulse on the detail screen
+  if (dview.id !== null) spawnPacket($("inbound-node"), $("queue-line-zone"), "#48D1CC", 0.55);
+}, 3600);
+
+/* ---------- login screen ---------- */
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} }
+};
+let pollTimer = null;
+let PROXY = null;   // set when the page is served by wallboard-proxy.py (same-address mode)
+
+function normServer(v) {
+  v = (v || "").trim().replace(/\/+$/, "");
+  if (!v) return "";
+  return /^https?:\/\//i.test(v) ? v : "https://" + v;
+}
+
+function showErr(html) { const e = $("lerr"); e.innerHTML = html; e.classList.add("on"); }
+function clearErr() { $("lerr").classList.remove("on"); }
+
+function friendlyError(e, server) {
+  const m = String(e && e.message || e);
+  if (location.protocol === "file:") {
+    return "This page was opened as a local file, and browsers block local files from contacting the PBX. Run <b>wallboard-proxy.py</b> (instructions in the chat) and open the address it prints, e.g. http://localhost:8080.";
+  }
+  if (e instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(m)) {
+    let h = "Can't reach the server. Check the address, that the PBX is reachable from this device, and that the server allows requests from this page (CORS) – hosting this file on the Deltapath server avoids that.";
+    if (server && /^https:/i.test(server)) {
+      h += ` If it uses a private or self-signed certificate, <a href="${esc(server)}" target="_blank" rel="noopener">open the server in a new tab</a> and accept the certificate warning once, then try again.`;
+    }
+    return h;
+  }
+  return esc(m);
+}
+
+async function connect(auto) {
+  const server = PROXY ? "" : normServer($("srv").value);
+  const user = $("usr").value.trim();
+  const pass = $("pwd").value;
+  if (!user || !pass) { showErr("Enter your ACL username and password."); return; }
+
+  clearErr();
+  const btn = $("lbtn"); btn.disabled = true; btn.textContent = "Connecting…";
+  CONFIG.baseUrl = server; CONFIG.username = user; CONFIG.password = pass;
+  state.loggedIn = false; state.names = {}; state.data = null;
+
+  try {
+    await login();
+    await loadNames();
+    const j = await api("/get/callcentre/queue/status");
+    ingest(j); state.ok = true; state.err = "";
+
+    if (!PROXY) store.set("dpq.server", server);
+    store.set("dpq.user", user);
+    store.set("dpq.tls", $("tls").checked ? "1" : "0");
+    if ($("rem").checked) { store.set("dpq.pass", pass); store.set("dpq.rem", "1"); }
+    else { store.del("dpq.pass"); store.del("dpq.rem"); }
+
+    $("login").classList.add("hide");
+    $("disc").hidden = false;
+    $("pwd").value = "";
+    setConn(); render(); openFromHash();
+    clearInterval(pollTimer); pollTimer = setInterval(poll, CONFIG.pollMs);
+  } catch (e) {
+    showErr(friendlyError(e, server));
+    if (auto) $("login").classList.remove("hide");
+  } finally {
+    btn.disabled = false; btn.textContent = "Connect & monitor";
+  }
+}
+
+function disconnect() {
+  if (dview.id !== null) closeDetail();
+  clearInterval(pollTimer); pollTimer = null;
+  state.data = null; state.loggedIn = false; state.ok = false;
+  store.del("dpq.pass"); store.del("dpq.rem");
+  $("rem").checked = false; $("pwd").value = "";
+  $("grid").innerHTML = '<div class="empty">Disconnected</div>'; $("totals").innerHTML = "";
+  $("disc").hidden = true;
+  $("login").classList.remove("hide");
+}
+
+$("lform").addEventListener("submit", ev => { ev.preventDefault(); connect(false); });
+$("disc").addEventListener("click", disconnect);
+$("showpwd").addEventListener("click", () => {
+  const p = $("pwd"), show = p.type === "password";
+  p.type = show ? "text" : "password"; $("showpwd").textContent = show ? "Hide" : "Show";
+});
+
+/* ---------- start ---------- */
+tickClock(); setInterval(tickClock, 1000);
+setInterval(render, 1000);                 // keeps wait timers ticking between polls
+
+$("srv").value = store.get("dpq.server") || "";
+$("usr").value = store.get("dpq.user") || "";
+if (store.get("dpq.tls") === "0") $("tls").checked = false;
+
+(async function start() {
+  if (location.protocol === "file:") {
+    showErr(friendlyError(new Error("file"), ""));
+  } else {
+    try {
+      const r = await fetch("/__proxy", { cache: "no-store" });
+      const j = r.ok ? await r.json() : null;
+      if (j && j.target) {
+        PROXY = j.target;
+        $("srv").value = j.target; $("srv").disabled = true;
+        $("tls").closest("label").style.display = "none";
+        document.querySelector(".lnote").textContent = "Connected through the local relay to " + j.target;
+      }
+    } catch (e) { /* not served by the relay: direct mode */ }
+  }
+
+  if (CONFIG.demo) {
+    $("login").classList.add("hide"); $("disc").hidden = true;
+    await poll(); openFromHash(); pollTimer = setInterval(poll, CONFIG.pollMs);
+  } else if (store.get("dpq.rem") === "1" && store.get("dpq.pass") && location.protocol !== "file:") {
+    $("pwd").value = store.get("dpq.pass"); $("rem").checked = true;
+    connect(true);                         // TV mode: reconnect automatically after a reload
+  }
+})();
+</script>
+</body>
+</html>
